@@ -10,13 +10,18 @@
   "scripts": {
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
+    "dev:desktop": "npm run dev --workspace=apps/desktop",
     "dev": "npm run dev:api",
     "test:api": "npm test --workspace=apps/api",
     "test:web": "npm test --workspace=apps/web",
-    "test": "npm run test:api",
+    "test:desktop": "npm test --workspace=apps/desktop",
+    "test": "npm run test:api && npm run test:desktop",
     "lint:api": "npm run lint --workspace=apps/api",
     "lint:web": "npm run lint --workspace=apps/web",
-    "lint": "npm run lint:api && npm run lint:web"
+    "lint:desktop": "npm run lint --workspace=apps/desktop",
+    "lint": "npm run lint:api && npm run lint:web && npm run lint:desktop",
+    "build:desktop": "npm run build --workspace=apps/desktop",
+    "dist:desktop": "npm run dist --workspace=apps/desktop"
   },
   "devDependencies": {
     "eslint": "^8.57.0"

@@ -1,0 +1,48 @@
+{
+  "name": "@circuitsage/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "CircuitSage AI Desktop Electron Shell",
+  "author": "CircuitSage AI Team",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "electron-builder --dir",
+    "dist": "electron-builder",
+    "test": "jest --runInBand",
+    "lint": "eslint \"src/**/*.js\" \"tests/**/*.js\""
+  },
+  "build": {
+    "appId": "com.circuitsage.desktop",
+    "productName": "CircuitSage AI",
+    "electronVersion": "32.1.2",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools"
+    },
+    "linux": {
+      "target": "AppImage",
+      "category": "Development"
+    }
+  },
+  "dependencies": {
+    "@circuitsage/shared": "*"
+  },
+  "devDependencies": {
+    "electron": "32.1.2",
+    "electron-builder": "^26.15.3",
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0"
+  }
+}
