@@ -1,13 +1,22 @@
 /**
- * CircuitSage AI — Main Diagnostic Workspace (Screens 2–8)
- * Houses intake form, problem description, optional circuit photo uploader,
- * board & component selection, engineering loading states, results panel, and multimeter follow-up probing.
+ * CircuitSage AI — Unified Desktop Workspace Page (/workspace)
+ *
+ * Implements the professional Arduino IDE-like workspace:
+ * - Top Bar: Branding, project title, board/port selection, Build (Verify), Upload, AI status
+ * - Left Sidebar: Project explorer, search, board hardware configuration, project actions
+ * - Center Workspace: Monaco Editor with tab strip, keyboard shortcuts, compiler diagnostics
+ * - Right Sidebar: AI Agent reasoning chat, task plan, code diffs, and embedded Circuit Triage
+ * - Bottom Panel: Problems, Build Output, Serial Monitor, Task Logs
+ * - Status Bar: Board, port, baud rate, editor line/col, build state, AI state
+ *
+ * Preserves 100% of existing circuit intake, ranked hypotheses, and multimeter probing logic.
  */
 
 'use client';
 
 import { useState, useEffect, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import IdeLayout from '../../components/ide/IdeLayout';
 import BoardSelector from '../../components/BoardSelector';
 import ProblemForm from '../../components/ProblemForm';
 import ImageUploader from '../../components/ImageUploader';
@@ -24,11 +33,11 @@ function WorkspaceContent() {
   const searchParams = useSearchParams();
 
   // Intake State
-  const [selectedBoard, setSelectedBoard] = useState('ESP32 DevKit v1');
+  const [selectedBoard, setSelectedBoard] = useState('AI Thinker ESP32-CAM');
   const [components, setComponents] = useState(['Blue LED', '220Ω Resistor']);
-  const [pinConnections, setPinConnections] = useState('GPIO 18 -> 220Ω Resistor -> LED Anode, GND -> Cathode');
+  const [pinConnections, setPinConnections] = useState('GPIO 4 -> Flash LED, GPIO 33 -> Status LED');
   const [description, setDescription] = useState(
-    'Blue 5mm LED connected to GPIO 18 never illuminates when running the blink sketch. Pin should pulse HIGH every second.'
+    'ESP32-CAM onboard flash LED on GPIO 4 draws excessive current and causes brownout reset during Wi-Fi transmission.'
   );
   const [imageFile, setImageFile] = useState(null);
 
@@ -181,85 +190,24 @@ function WorkspaceContent() {
     }
   }
 
-  function handleResetWorkspace() {
-    setSelectedBoard('ESP32 DevKit v1');
-    setComponents([]);
-    setPinConnections('');
-    setDescription('');
-    setImageFile(null);
-    setDiagnosisResult(null);
-    setFormErrors({});
-    setApiError(null);
-    setMeasurementsLog([]);
-    setEliminatedHypotheses([]);
-    setShowMeasurementModal(false);
-  }
-
-  return (
-    <div className="space-y-6">
-      {/* Workspace Header & Demo Notification */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
-            <span>🔬</span> Circuit Diagnostic Workspace
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Configure target hardware, describe observed failure symptoms, and inspect ranked electrical hypotheses.
-          </p>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleResetWorkspace}
-            className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800 text-xs font-mono transition-colors"
-          >
-            Clear Workspace
-          </button>
-        </div>
-      </div>
-
-      {/* Demo Banner */}
+  // Diagnostic Assistant Component rendered in Right Sidebar Triage Tab
+  const diagnosticComponent = (
+    <div className="space-y-4 text-xs font-mono">
       <DemoBanner isDemo={isDemo} onToggleDemo={handleToggleDemo} />
 
-      {/* API Error Alert */}
       {apiError && (
-        <div
-          role="alert"
-          className="p-4 rounded-xl bg-rose-950/50 border border-rose-800 text-rose-200 text-xs space-y-1 shadow-lg"
-        >
-          <div className="font-semibold flex items-center gap-1.5 text-rose-400">
-            <span>⚠️</span> Diagnostic Request Failed
-          </div>
-          <p className="text-rose-300">{apiError}</p>
-          <div className="pt-1 flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleToggleDemo(true)}
-              className="text-[11px] underline font-mono text-rose-400 hover:text-rose-200"
-            >
-              Switch to Demo Mode to test without backend server
-            </button>
-          </div>
+        <div className="p-3 rounded-lg bg-rose-950/60 border border-rose-800 text-rose-200 text-xs space-y-1">
+          <div className="font-semibold text-rose-400">⚠️ Request Failed</div>
+          <p>{apiError}</p>
         </div>
       )}
 
-      {/* Responsive Two-Column Engineering Layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        {/* Left Column: Circuit Intake Controls (5 Cols on LG) */}
-        <section
-          className="lg:col-span-5 space-y-6 bg-slate-900/50 p-5 rounded-2xl border border-slate-800/80"
-          aria-label="Circuit Intake Section"
-        >
-          <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
-            <h2 className="text-xs font-bold text-slate-200 uppercase tracking-wider font-mono">
-              1. Hardware & Symptom Intake
-            </h2>
-            <span className="text-[11px] text-slate-500 font-mono">Input Form</span>
-          </div>
-
-          <form onSubmit={handleRunDiagnosis} className="space-y-5">
-            {/* Board Selection */}
+      {isLoading ? (
+        <DiagnosisLoading onCancel={() => setIsLoading(false)} />
+      ) : (
+        <div className="space-y-4">
+          {/* Intake Form */}
+          <form onSubmit={handleRunDiagnosis} className="space-y-3 bg-slate-900/60 p-3 rounded-xl border border-slate-800">
             <BoardSelector
               selectedBoard={selectedBoard}
               onBoardChange={(b) => {
@@ -273,7 +221,6 @@ function WorkspaceContent() {
               error={formErrors.board}
             />
 
-            {/* Problem Description */}
             <ProblemForm
               description={description}
               onDescriptionChange={(d) => {
@@ -283,78 +230,55 @@ function WorkspaceContent() {
               error={formErrors.description}
             />
 
-            {/* Circuit Photo Upload */}
             <ImageUploader
               file={imageFile}
               onFileChange={setImageFile}
               error={formErrors.image}
             />
 
-            {/* Primary Action Button */}
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={isLoading}
-                className="w-full py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium text-xs uppercase tracking-wider transition-all font-mono shadow-lg shadow-blue-600/20 flex items-center justify-center gap-2"
-              >
-                {isLoading ? (
-                  <>
-                    <span className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin"></span>
-                    <span>Analyzing Circuit Hardware...</span>
-                  </>
-                ) : (
-                  <>
-                    <span>⚡ Run Circuit Diagnosis</span>
-                  </>
-                )}
-              </button>
-            </div>
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full py-2 px-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors shadow-md shadow-blue-600/20"
+            >
+              ⚡ Run Circuit Diagnosis
+            </button>
           </form>
-        </section>
 
-        {/* Right Column: Diagnostic Loading, Results Panel & Multimeter Probing (7 Cols on LG) */}
-        <section
-          className="lg:col-span-7 space-y-6"
-          aria-label="Diagnostic Results and Multimeter Probing Section"
-        >
-          {isLoading ? (
-            <DiagnosisLoading onCancel={() => setIsLoading(false)} />
-          ) : (
-            <>
-              {/* Measurement Input Modal / Inline Form */}
-              {showMeasurementModal && (
-                <MeasurementInput
-                  initialTest={activeProbingTest}
-                  onSubmit={handleSubmitMeasurement}
-                  onCancel={() => {
-                    setShowMeasurementModal(false);
-                    setActiveProbingTest(null);
-                  }}
-                  isSubmitting={isSubmittingMeasurement}
-                />
-              )}
-
-              {/* Diagnostic Results Presentation */}
-              <ResultsPanel
-                diagnosis={diagnosisResult}
-                onSelectTestForProbing={handleTriggerProbing}
-                measurementsLog={measurementsLog}
-                eliminatedHypotheses={eliminatedHypotheses}
-              />
-            </>
+          {/* Measurement Probing Modal */}
+          {showMeasurementModal && (
+            <MeasurementInput
+              initialTest={activeProbingTest}
+              onSubmit={handleSubmitMeasurement}
+              onCancel={() => {
+                setShowMeasurementModal(false);
+                setActiveProbingTest(null);
+              }}
+              isSubmitting={isSubmittingMeasurement}
+            />
           )}
-        </section>
-      </div>
+
+          {/* Results Presentation */}
+          <ResultsPanel
+            diagnosis={diagnosisResult}
+            onSelectTestForProbing={handleTriggerProbing}
+            measurementsLog={measurementsLog}
+            eliminatedHypotheses={eliminatedHypotheses}
+          />
+        </div>
+      )}
     </div>
   );
+
+  return <IdeLayout diagnosticComponent={diagnosticComponent} />;
 }
 
 export default function WorkspacePage() {
   return (
     <Suspense
       fallback={
-        <div className="p-12 text-center text-xs text-slate-500 font-mono">
-          Loading CircuitSage Diagnostic Workspace...
+        <div className="h-screen w-screen flex items-center justify-center bg-slate-950 text-slate-500 font-mono text-xs">
+          Loading CircuitSage IDE Workspace...
         </div>
       }
     >

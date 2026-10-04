@@ -15,7 +15,7 @@
     "test:api": "npm test --workspace=apps/api",
     "test:web": "npm test --workspace=apps/web",
     "test:desktop": "npm test --workspace=apps/desktop",
-    "test": "npm run test:api && npm run test:desktop",
+    "test": "npm run test:api && npm run test:desktop && npm run test:web",
     "lint:api": "npm run lint --workspace=apps/api",
     "lint:web": "npm run lint --workspace=apps/web",
     "lint:desktop": "npm run lint --workspace=apps/desktop",

@@ -6,11 +6,84 @@
 const STORAGE_KEYS = {
   CASES: 'circuitsage_local_cases_v1',
   DEMO_MODE: 'circuitsage_demo_mode_v1',
-  API_URL_OVERRIDE: 'circuitsage_api_url_override_v1'
+  API_URL_OVERRIDE: 'circuitsage_api_url_override_v1',
+  IDE_PREFS: 'circuitsage_ide_prefs_v1',
+  IDE_FILES: 'circuitsage_ide_files_v1'
 };
 
 function isBrowser() {
   return typeof window !== 'undefined';
+}
+
+/**
+ * Retrieves persisted IDE UI preferences (panel sizes, active tabs, board/port).
+ */
+export function getIdePreferences() {
+  if (!isBrowser()) {
+    return {
+      leftWidth: 260,
+      rightWidth: 340,
+      bottomHeight: 220,
+      leftCollapsed: false,
+      rightCollapsed: false,
+      bottomCollapsed: false,
+      activeLeftTab: 'files',
+      activeBottomTab: 'output',
+      activeRightTab: 'ai',
+      selectedBoard: 'AI Thinker ESP32-CAM',
+      selectedPort: 'COM3',
+      baudRate: 115200
+    };
+  }
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.IDE_PREFS);
+    if (!raw) {
+      return {
+        leftWidth: 260,
+        rightWidth: 340,
+        bottomHeight: 220,
+        leftCollapsed: false,
+        rightCollapsed: false,
+        bottomCollapsed: false,
+        activeLeftTab: 'files',
+        activeBottomTab: 'output',
+        activeRightTab: 'ai',
+        selectedBoard: 'AI Thinker ESP32-CAM',
+        selectedPort: 'COM3',
+        baudRate: 115200
+      };
+    }
+    return JSON.parse(raw);
+  } catch {
+    return {
+      leftWidth: 260,
+      rightWidth: 340,
+      bottomHeight: 220,
+      leftCollapsed: false,
+      rightCollapsed: false,
+      bottomCollapsed: false,
+      activeLeftTab: 'files',
+      activeBottomTab: 'output',
+      activeRightTab: 'ai',
+      selectedBoard: 'AI Thinker ESP32-CAM',
+      selectedPort: 'COM3',
+      baudRate: 115200
+    };
+  }
+}
+
+/**
+ * Persists updated IDE preferences to localStorage.
+ */
+export function saveIdePreferences(prefs) {
+  if (!isBrowser() || !prefs) return;
+  try {
+    const current = getIdePreferences();
+    localStorage.setItem(STORAGE_KEYS.IDE_PREFS, JSON.stringify({ ...current, ...prefs }));
+  } catch (err) {
+    console.error('Failed to save IDE preferences', err);
+  }
 }
 
 /**

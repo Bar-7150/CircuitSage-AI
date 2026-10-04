@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@circuitsage/shared": "*",
+    "@monaco-editor/react": "^4.7.0",
     "@supabase/supabase-js": "^2.117.2",
     "next": "^14.2.14",
     "react": "^18.3.1",
