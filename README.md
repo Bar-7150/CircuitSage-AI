@@ -137,21 +137,31 @@ Debugging physical electronics is notoriously difficult for beginners:
 
 ---
 
-## 9. Environment Setup
+## 9. Monorepo Structure & Environment Setup
 
-Clone the repository and initialize project dependencies:
+The repository is organized as an npm workspace monorepo:
+```text
+CircuitSage_AI/
+├── apps/
+│   ├── api/                   # Express.js REST API (Node.js)
+│   └── web/                   # Next.js Frontend (React 18 / Tailwind CSS)
+├── packages/
+│   └── shared/                # Shared constants (epistemic states, error codes)
+├── docs/                      # Engineering documentation & architectural blueprints
+├── package.json               # Root monorepo workspace configuration
+├── .gitignore                 # Root gitignore (ignoring secrets, node_modules, weights)
+└── .env.example               # Root template for environment variables
+```
+
+### Installation
+Clone the repository and install all workspace dependencies from the root directory:
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/your-username/CircuitSage_AI.git
 cd CircuitSage_AI
 
-# 2. Install backend dependencies
-cd backend
-npm install
-
-# 3. Install frontend dependencies
-cd ../frontend
+# 2. Install dependencies across all workspaces
 npm install
 ```
 
@@ -159,37 +169,45 @@ npm install
 
 ## 10. Environment Variable Configuration
 
-Create `.env` files in both the `backend/` and `frontend/` directories using the templates below.
+Copy the example configuration files in the root and app directories:
 
-### Backend Configuration (`backend/.env`)
+```bash
+# Backend Express configuration
+cp apps/api/.env.example apps/api/.env
+
+# Frontend Next.js configuration
+cp apps/web/.env.example apps/web/.env.local
+```
+
+### Backend Configuration (`apps/api/.env`)
 ```env
-# Server
 PORT=8000
 NODE_ENV=development
+API_PREFIX=/api/v1
+CORS_ORIGIN=http://localhost:3000
 
-# Supabase Persistence & Auth
+# Supabase Persistence & Auth (Placeholders for development)
 SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-supabase-anon-key
-SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key
+SUPABASE_ANON_KEY=your-supabase-anon-key-placeholder
+SUPABASE_SERVICE_ROLE_KEY=your-supabase-service-role-key-placeholder
 
-# Local Gemma 4 AI Runtime
+# Local Gemma 4 AI Runtime Configuration
 GEMMA_RUNTIME_URL=http://127.0.0.1:11434
 GEMMA_MODEL_NAME=gemma4:latest
 INFERENCE_TIMEOUT_MS=30000
 
-# Storage & Logging
-LOCAL_STORAGE_PATH=./data
-LOG_LEVEL=info
+# Local Storage (Offline Session Fallback)
+LOCAL_DATA_DIR=./data
 ```
 
-### Frontend Configuration (`frontend/.env.local`)
+### Frontend Configuration (`apps/web/.env.local`)
 ```env
 # Public Supabase Client Config
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-supabase-anon-key-placeholder
 
 # Express API Base URL
-NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api/v1
+NEXT_PUBLIC_API_BASE_URL=http://localhost:8000/api/v1
 ```
 
 > [!CAUTION]
@@ -197,73 +215,41 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000/api/v1
 
 ---
 
-## 11. Startup Commands
+## 11. Development & Startup Commands
+
+Run applications either through root workspace scripts or directly within each workspace:
 
 ```bash
-# Start the Express.js Backend (Port 8000)
-cd backend
-npm run dev
+# Start both Backend and Frontend independently:
 
-# Start the Next.js Frontend (Port 3000)
-cd frontend
-npm run dev
+# 1. Start the Express.js Backend API (Port 8000)
+npm run dev:api
+# Or from apps/api: npm run dev
+
+# 2. Start the Next.js Frontend (Port 3000)
+npm run dev:web
+# Or from apps/web: npm run dev
 ```
 
-Open `http://localhost:3000` in your web browser to access the CircuitSage AI interface.
+Open `http://localhost:3000` in your web browser to access the CircuitSage AI System Status & Diagnostics dashboard.
 
 ---
 
-## 12. Supabase Project Setup
+## 12. Testing & Quality Control Commands
 
-1. Create a new project in [Supabase](https://supabase.com) (or launch locally using the [Supabase CLI](https://supabase.com/docs/guides/cli)).
-2. Navigate to the **SQL Editor** in the Supabase Dashboard.
-3. Run the project schema migration located at `backend/migrations/001_initial_schema.sql` to initialize:
-   * `profiles` (with RLS enabled)
-   * `diagnostic_cases` (with RLS enabled: `auth.uid() = user_id`)
-   * `case_messages`
-   * `diagnostic_hypotheses`
-   * `measurements`
-   * `knowledge_sources`
-   * `diagnostic_feedback`
-4. In **Project Settings** $\rightarrow$ **API**, copy your `Project URL`, `anon public key`, and `service_role secret` into your backend `.env` file.
-
----
-
-## 13. Local Gemma 4 Runtime Setup
-
-CircuitSage AI communicates with a locally running Gemma 4 model over an isolated HTTP service adapter:
-
-1. Install a compatible local runtime (e.g., [Ollama](https://ollama.ai) or a local `llama.cpp` server).
-2. Pull or load the Gemma 4 open weights:
-   ```bash
-   ollama pull gemma4:latest
-   # Or run via local server on port 11434
-   ```
-3. Test that the local runtime is listening:
-   ```bash
-   curl http://127.0.0.1:11434/api/version
-   ```
-4. Verify that `GEMMA_RUNTIME_URL` in `backend/.env` points to your local inference port.
-
-> [!NOTE]
-> **Multimodal Vision Stance:** If your local Gemma 4 runtime does not have multimodal vision enabled, CircuitSage AI automatically falls back to text-only symptom descriptions and pin selectors without errors.
-
----
-
-## 14. Testing Commands
-
-Execute automated tests for the rules engine and API endpoints:
+Run tests and linting across all monorepo workspaces from the root directory:
 
 ```bash
-# Run backend Jest unit and Supertest integration tests
-cd backend
+# Run Express API Jest integration tests
 npm test
+# (Equivalent to npm run test:api)
 
-# Run tests with test coverage reporting
-npm test -- --coverage
+# Run ESLint across all workspaces (API & Web)
+npm run lint
+
+# Build production bundle for the Next.js frontend
+npm run build --workspace=apps/web
 ```
-
-*(Note: Automated tests will run once implemented in the Kenshi milestone).*
 
 ---
 
