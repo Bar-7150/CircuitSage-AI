@@ -24,12 +24,18 @@ const ERROR_CODES = {
 
 const SUPPORTED_BOARDS = [
   'ESP32 DevKit v1',
+  'AI Thinker ESP32-CAM',
+  'ESP32 Wrover Module',
+  'ESP32-S3 Dev Module',
   'Arduino Uno R3',
   'Raspberry Pi Pico'
 ];
 
 const BOARD_FQBNS = {
   'ESP32 DevKit v1': 'esp32:esp32:esp32',
+  'AI Thinker ESP32-CAM': 'esp32:esp32:esp32cam',
+  'ESP32 Wrover Module': 'esp32:esp32:esp32wrover',
+  'ESP32-S3 Dev Module': 'esp32:esp32:esp32s3',
   'Arduino Uno R3': 'arduino:avr:uno',
   'Raspberry Pi Pico': 'rp2040:rp2040:rpipico'
 };

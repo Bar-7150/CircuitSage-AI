@@ -31,9 +31,16 @@ const electronAPI = {
     listPorts: () => ipcRenderer.invoke('hardware:listPorts')
   },
 
-  // Toolchain Status (Arduino CLI check)
+  // Toolchain & Embedded Build Operations
   toolchain: {
-    checkStatus: () => ipcRenderer.invoke('toolchain:checkStatus')
+    checkStatus: () => ipcRenderer.invoke('toolchain:checkStatus'),
+    getSetupInstructions: () => ipcRenderer.invoke('toolchain:getSetupInstructions'),
+    listCores: () => ipcRenderer.invoke('toolchain:listCores'),
+    listBoards: (searchFilter) => ipcRenderer.invoke('toolchain:listBoards', searchFilter),
+    verifyPlatform: (fqbn) => ipcRenderer.invoke('toolchain:verifyPlatform', fqbn),
+    compile: (payload) => ipcRenderer.invoke('toolchain:compile', payload),
+    cancelCompile: (buildId) => ipcRenderer.invoke('toolchain:cancelCompile', buildId),
+    getPresets: () => ipcRenderer.invoke('toolchain:getPresets')
   }
 };
 

@@ -1,47 +1,69 @@
 /**
- * CircuitSage AI — Toolchain Status IPC Handler
+ * CircuitSage AI — Toolchain & Embedded Build IPC Handler
  *
- * Verifies if Arduino CLI is installed on host system.
+ * Exposes explicit, validated toolchain endpoints:
+ * - Status, version, executable resolution, setup instructions
+ * - Installed core & supported board discovery
+ * - Platform core verification
+ * - Sketch project compilation & cancellation
  */
 
-const { exec } = require('child_process');
-const util = require('util');
-const execAsync = util.promisify(exec);
+const {
+  detectToolchainStatus,
+  getSetupInstructions,
+  queryInstalledCores,
+  querySupportedBoards,
+  verifyPlatformInstalled,
+  compileProject,
+  cancelCompilation,
+  ESP32_BOARD_PRESETS
+} = require('../services/embeddedBuildService');
 
 async function handleCheckStatus() {
-  const isWin = process.platform === 'win32';
-  const findCmd = isWin ? 'where arduino-cli' : 'which arduino-cli';
+  return await detectToolchainStatus();
+}
 
-  try {
-    const { stdout: binPath } = await execAsync(findCmd, { timeout: 2000 });
-    const trimmedPath = binPath.trim().split('\n')[0].trim();
+async function handleGetSetupInstructions() {
+  return getSetupInstructions();
+}
 
-    if (!trimmedPath) {
-      return { installed: false, version: null, path: null };
-    }
+async function handleListCores() {
+  const cores = await queryInstalledCores();
+  return { success: true, cores };
+}
 
-    try {
-      const { stdout: versionOut } = await execAsync(`"${trimmedPath}" version --format json`, {
-        timeout: 2500
-      });
-      const parsed = JSON.parse(versionOut);
-      return {
-        installed: true,
-        version: parsed.VersionString || 'installed',
-        path: trimmedPath
-      };
-    } catch {
-      return {
-        installed: true,
-        version: 'installed',
-        path: trimmedPath
-      };
-    }
-  } catch {
-    return { installed: false, version: null, path: null };
+async function handleListBoards(_event, searchFilter) {
+  const boards = await querySupportedBoards(searchFilter);
+  return { success: true, boards };
+}
+
+async function handleVerifyPlatform(_event, fqbn) {
+  return await verifyPlatformInstalled(fqbn);
+}
+
+async function handleCompile(_event, compilePayload) {
+  if (!compilePayload || typeof compilePayload !== 'object') {
+    throw new Error('INVALID_PAYLOAD: Compilation payload must be an object.');
   }
+  return await compileProject(compilePayload);
+}
+
+async function handleCancelCompile(_event, buildId) {
+  const cancelled = cancelCompilation(buildId);
+  return { success: cancelled };
+}
+
+function handleGetPresets() {
+  return { success: true, presets: ESP32_BOARD_PRESETS };
 }
 
 module.exports = {
-  handleCheckStatus
+  handleCheckStatus,
+  handleGetSetupInstructions,
+  handleListCores,
+  handleListBoards,
+  handleVerifyPlatform,
+  handleCompile,
+  handleCancelCompile,
+  handleGetPresets
 };

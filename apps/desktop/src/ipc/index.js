@@ -51,8 +51,15 @@ function registerIpcHandlers(getMainWindow) {
   // Hardware Discovery
   ipcMain.handle('hardware:listPorts', wrapHandler(hardwareHandler.handleListPorts, 'HARDWARE_ERROR'));
 
-  // Toolchain Status
+  // Toolchain & Build Operations
   ipcMain.handle('toolchain:checkStatus', wrapHandler(toolchainHandler.handleCheckStatus, 'TOOLCHAIN_ERROR'));
+  ipcMain.handle('toolchain:getSetupInstructions', wrapHandler(toolchainHandler.handleGetSetupInstructions));
+  ipcMain.handle('toolchain:listCores', wrapHandler(toolchainHandler.handleListCores, 'TOOLCHAIN_ERROR'));
+  ipcMain.handle('toolchain:listBoards', wrapHandler(toolchainHandler.handleListBoards, 'TOOLCHAIN_ERROR'));
+  ipcMain.handle('toolchain:verifyPlatform', wrapHandler(toolchainHandler.handleVerifyPlatform, 'TOOLCHAIN_ERROR'));
+  ipcMain.handle('toolchain:compile', wrapHandler(toolchainHandler.handleCompile, 'COMPILATION_ERROR'));
+  ipcMain.handle('toolchain:cancelCompile', wrapHandler(toolchainHandler.handleCancelCompile, 'COMPILATION_ERROR'));
+  ipcMain.handle('toolchain:getPresets', wrapHandler(toolchainHandler.handleGetPresets));
 }
 
 module.exports = {

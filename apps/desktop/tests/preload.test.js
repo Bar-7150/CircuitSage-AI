@@ -57,6 +57,20 @@ describe('Desktop Preload API Security Verification', () => {
     ]);
   });
 
+  it('should verify toolchain operations are restricted to approved methods', () => {
+    const toolchainMethods = Object.keys(exposedApiValue.toolchain);
+    expect(toolchainMethods.sort()).toEqual([
+      'cancelCompile',
+      'checkStatus',
+      'compile',
+      'getPresets',
+      'getSetupInstructions',
+      'listBoards',
+      'listCores',
+      'verifyPlatform'
+    ]);
+  });
+
   it('should NOT leak unrestricted Node.js primitives or shell execution', () => {
     expect(exposedApiValue).not.toHaveProperty('require');
     expect(exposedApiValue).not.toHaveProperty('process');
