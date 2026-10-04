@@ -20,7 +20,7 @@ const { serialService } = require('./services/serialService');
 let mainWindow = null;
 
 const IS_DEV = process.argv.includes('--dev') || process.env.NODE_ENV === 'development';
-const FRONTEND_URL = process.env.ELECTRON_START_URL || 'http://localhost:3000';
+const FRONTEND_URL = process.env.ELECTRON_START_URL || 'http://localhost:3000/workspace';
 
 /**
  * Configure Content Security Policy (CSP) headers
@@ -32,12 +32,12 @@ function setupContentSecurityPolicy() {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           [
-            "default-src 'self' http://localhost:3000",
-            "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:3000",
-            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com http://localhost:3000",
-            "font-src 'self' https://fonts.gstatic.com data: http://localhost:3000",
-            "connect-src 'self' http://localhost:3000 http://127.0.0.1:8000 http://localhost:8000 ws://localhost:3000 https://*.supabase.co",
-            "img-src 'self' data: blob: http://localhost:8000 http://localhost:3000"
+            "default-src 'self' http://localhost:3000 http://127.0.0.1:3000",
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:3000 http://127.0.0.1:3000",
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com http://localhost:3000 http://127.0.0.1:3000",
+            "font-src 'self' https://fonts.gstatic.com data: http://localhost:3000 http://127.0.0.1:3000",
+            "connect-src 'self' http://localhost:3000 http://127.0.0.1:3000 http://127.0.0.1:8000 http://localhost:8000 ws://localhost:3000 ws://127.0.0.1:3000 https://*.supabase.co",
+            "img-src 'self' data: blob: http://localhost:8000 http://127.0.0.1:8000 http://localhost:3000 http://127.0.0.1:3000"
           ].join('; ')
         ]
       }
@@ -70,6 +70,16 @@ function createWindow() {
       mainWindow.webContents.openDevTools({ mode: 'detach' });
     }
   });
+
+  // Allow F12 and Ctrl+Shift+I to inspect DevTools in development mode
+  if (IS_DEV) {
+    mainWindow.webContents.on('before-input-event', (event, input) => {
+      if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+        mainWindow.webContents.toggleDevTools();
+        event.preventDefault();
+      }
+    });
+  }
 
   // ==========================================================================
   // NAVIGATION & WINDOW SECURITY CONTROLS
