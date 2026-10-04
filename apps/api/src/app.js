@@ -11,6 +11,7 @@ const errorHandler = require('./middleware/errorHandler');
 
 // Route imports
 const healthRoutes = require('./routes/health');
+const casesRoutes = require('./routes/cases');
 
 const app = express();
 
@@ -25,6 +26,7 @@ app.use(express.json({ limit: '1mb' }));
 
 // Mount API routes
 app.use(config.apiPrefix, healthRoutes);
+app.use(config.apiPrefix, casesRoutes);
 
 // 404 Handler for unmatched routes
 app.use(notFoundHandler);
