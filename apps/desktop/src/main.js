@@ -15,6 +15,7 @@ const { app, BrowserWindow, shell, session } = require('electron');
 const path = require('path');
 const { registerIpcHandlers } = require('./ipc');
 const { startManagedApiServer, stopManagedApiServer } = require('./processManager');
+const { serialService } = require('./services/serialService');
 
 let mainWindow = null;
 
@@ -176,7 +177,12 @@ app.whenReady().then(async () => {
 });
 
 // Graceful shutdown
-app.on('before-quit', () => {
+app.on('before-quit', async () => {
+  try {
+    await serialService.shutdown();
+  } catch {
+    // Ignore shutdown error
+  }
   stopManagedApiServer();
 });
 

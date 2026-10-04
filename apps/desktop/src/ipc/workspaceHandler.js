@@ -399,9 +399,19 @@ async function handleSaveProjectMetadata(_event, metadata) {
   if (!activeWorkspacePath) {
     throw new Error('NO_ACTIVE_WORKSPACE: Select a workspace first.');
   }
+  const payload = (metadata && metadata.metadata) ? metadata.metadata : (metadata || {});
   const metaPath = path.join(activeWorkspacePath, 'circuitsage.json');
-  await fs.promises.writeFile(metaPath, JSON.stringify(metadata, null, 2), 'utf8');
-  return { success: true };
+  let existing = {};
+  if (fs.existsSync(metaPath)) {
+    try {
+      existing = JSON.parse(await fs.promises.readFile(metaPath, 'utf8'));
+    } catch {
+      existing = {};
+    }
+  }
+  const merged = { ...existing, ...payload };
+  await fs.promises.writeFile(metaPath, JSON.stringify(merged, null, 2), 'utf8');
+  return { success: true, metadata: merged };
 }
 
 // Export for tests to verify path boundary logic independently

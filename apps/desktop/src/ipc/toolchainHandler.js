@@ -18,6 +18,7 @@ const {
   cancelCompilation,
   ESP32_BOARD_PRESETS
 } = require('../services/embeddedBuildService');
+const { uploadFirmware, cancelUpload } = require('../services/uploadService');
 
 async function handleCheckStatus() {
   return await detectToolchainStatus();
@@ -53,6 +54,18 @@ async function handleCancelCompile(_event, buildId) {
   return { success: cancelled };
 }
 
+async function handleUpload(_event, uploadPayload) {
+  if (!uploadPayload || typeof uploadPayload !== 'object') {
+    throw new Error('INVALID_PAYLOAD: Upload payload must be an object.');
+  }
+  return await uploadFirmware(uploadPayload);
+}
+
+async function handleCancelUpload(_event, uploadId) {
+  const cancelled = cancelUpload(uploadId);
+  return { success: cancelled };
+}
+
 function handleGetPresets() {
   return { success: true, presets: ESP32_BOARD_PRESETS };
 }
@@ -65,5 +78,8 @@ module.exports = {
   handleVerifyPlatform,
   handleCompile,
   handleCancelCompile,
+  handleUpload,
+  handleCancelUpload,
   handleGetPresets
 };
+

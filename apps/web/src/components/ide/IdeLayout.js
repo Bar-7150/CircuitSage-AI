@@ -6,7 +6,7 @@
  * 2. Left sidebar: Project explorer, search, board configuration, and project actions (with rename & delete)
  * 3. Center workspace: Monaco Editor with tab strip, folding, find/replace, and diagnostic squiggles
  * 4. Right sidebar: AI agent chat, task plan, diffs, undo/revert to backup, and embedded circuit triage
- * 5. Bottom panel: Problems, Build Output, Serial Monitor, and Task Logs
+ * 5. Bottom panel: Problems, Build & Flash Output, Serial Monitor, and Task Logs
  * 6. Status bar: Board, port, baud rate, editor state, build state, and AI state
  *
  * Implements:
@@ -16,6 +16,10 @@
  * - AI diff backup & revert functionality
  * - Template-based new project creation modal (ESP32-CAM, ESP32 Dev, Uno)
  * - Safe project metadata & board configuration persistence (circuitsage.json)
+ * - Explicit Upload Approval Modal with target board & port verification
+ * - Real Serial Monitor with connect/disconnect, baud rate, line endings, copy, log save, and AI authorization
+ * - Shared port-ownership with auto-pause during firmware upload
+ * - Mandatory circuit disclaimer on flash completion
  */
 
 'use client';
@@ -48,6 +52,15 @@ export default function IdeLayout({ diagnosticComponent }) {
   const [selectedPort, setSelectedPort] = useState('COM3');
   const [baudRate, setBaudRate] = useState(115200);
 
+  // Serial Monitor State
+  const [isSerialConnected, setIsSerialConnected] = useState(false);
+  const [lineEnding, setLineEnding] = useState('lf');
+  const [aiAuthorized, setAiAuthorized] = useState(false);
+  const [serialLogs, setSerialLogs] = useState([
+    { time: '12:00:01', text: '[ESP32-CAM Boot] Flash chip: 4MB QIO, CPU: 240MHz' },
+    { time: '12:00:02', text: '[Telemetry] Heartbeat pulse OK | Logic Voltage: 3.3V | VDD: 3.28V' }
+  ]);
+
   // Project & Workspace State
   const [workspacePath, setWorkspacePath] = useState(null);
   const [projectName, setProjectName] = useState('esp32_cam_firmware');
@@ -65,6 +78,7 @@ export default function IdeLayout({ diagnosticComponent }) {
   // Modals
   const [conflictModal, setConflictModal] = useState(null);
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
   const [newProjectForm, setNewProjectForm] = useState({
     name: 'esp32_project',
     templateId: 'esp32cam'
@@ -81,12 +95,6 @@ export default function IdeLayout({ diagnosticComponent }) {
   const [buildResult, setBuildResult] = useState(null);
   const [problems, setProblems] = useState([]);
   const [bottomTab, setBottomTab] = useState('output');
-
-  // Serial Monitor State
-  const [serialLogs, setSerialLogs] = useState([
-    { time: '12:00:01', text: '[ESP32-CAM Boot] Flash chip: 4MB QIO, CPU: 240MHz' },
-    { time: '12:00:02', text: '[Telemetry] Heartbeat pulse OK | Logic Voltage: 3.3V | VDD: 3.28V' }
-  ]);
 
   // Task & System Logs
   const [taskLogs, setTaskLogs] = useState([
@@ -163,7 +171,7 @@ export default function IdeLayout({ diagnosticComponent }) {
     }
   }, []);
 
-  // Load preferences and detect hardware ports on mount
+  // Set up real serial listeners and ports on mount
   useEffect(() => {
     const prefs = getIdePreferences();
     if (prefs) {
@@ -176,7 +184,6 @@ export default function IdeLayout({ diagnosticComponent }) {
     }
     setPrefsLoaded(true);
 
-    // Detect ports from Electron if available
     async function detectEnvironment() {
       if (typeof window !== 'undefined' && window.electronAPI?.hardware?.listPorts) {
         try {
@@ -214,6 +221,39 @@ export default function IdeLayout({ diagnosticComponent }) {
     }
 
     detectEnvironment();
+
+    // Stream serial data from desktop service
+    if (typeof window !== 'undefined' && window.electronAPI?.hardware) {
+      const unsubData = window.electronAPI.hardware.onSerialData
+        ? window.electronAPI.hardware.onSerialData((chunk) => {
+            setSerialLogs((prev) => [
+              ...prev,
+              { time: new Date().toLocaleTimeString(), text: chunk }
+            ]);
+          })
+        : null;
+
+      const unsubState = window.electronAPI.hardware.onSerialStateChanged
+        ? window.electronAPI.hardware.onSerialStateChanged((state) => {
+            setIsSerialConnected(Boolean(state.isConnected));
+          })
+        : null;
+
+      const unsubErr = window.electronAPI.hardware.onSerialError
+        ? window.electronAPI.hardware.onSerialError((err) => {
+            setSerialLogs((prev) => [
+              ...prev,
+              { time: new Date().toLocaleTimeString(), text: `[Error] ${err}`, isError: true }
+            ]);
+          })
+        : null;
+
+      return () => {
+        if (unsubData) unsubData();
+        if (unsubState) unsubState();
+        if (unsubErr) unsubErr();
+      };
+    }
   }, [loadWorkspaceFromDirectory]);
 
   // Save updated preferences whenever panel dimensions change
@@ -281,11 +321,11 @@ export default function IdeLayout({ diagnosticComponent }) {
     if (typeof window !== 'undefined' && window.electronAPI?.workspace?.saveFileSafe && workspacePath) {
       try {
         const targetPath = fileToSave.path || fileToSave.name;
-        const res = await window.electronAPI.workspace.saveFileSafe({
-          filePath: targetPath,
-          content: fileToSave.content,
-          expectedMtime: fileToSave.mtime
-        });
+        const res = await window.electronAPI.workspace.saveFileSafe(
+          targetPath,
+          fileToSave.content,
+          fileToSave.mtime
+        );
 
         if (res.success) {
           setFiles((prev) =>
@@ -305,11 +345,11 @@ export default function IdeLayout({ diagnosticComponent }) {
             expectedMtime: fileToSave.mtime,
             currentMtime: res.currentMtime,
             onOverwrite: async () => {
-              const forceRes = await window.electronAPI.workspace.saveFileSafe({
-                filePath: targetPath,
-                content: fileToSave.content,
-                expectedMtime: res.currentMtime
-              });
+              const forceRes = await window.electronAPI.workspace.saveFileSafe(
+                targetPath,
+                fileToSave.content,
+                res.currentMtime
+              );
               if (forceRes.success) {
                 setFiles((prev) =>
                   prev.map((f) => (f.name === activeFileName ? { ...f, mtime: forceRes.mtime } : f))
@@ -325,7 +365,7 @@ export default function IdeLayout({ diagnosticComponent }) {
               setConflictModal(null);
             },
             onReload: async () => {
-              const reloadRes = await window.electronAPI.workspace.readFile({ filePath: targetPath });
+              const reloadRes = await window.electronAPI.workspace.readFile(targetPath);
               if (reloadRes.success) {
                 setFiles((prev) =>
                   prev.map((f) => (f.name === activeFileName ? { ...f, content: reloadRes.content, mtime: reloadRes.mtime } : f))
@@ -390,7 +430,7 @@ export default function IdeLayout({ diagnosticComponent }) {
     const defaultContent = `// ${name}\n`;
     if (typeof window !== 'undefined' && window.electronAPI?.workspace?.createFile && workspacePath) {
       try {
-        const res = await window.electronAPI.workspace.createFile({ filePath: name, content: defaultContent });
+        const res = await window.electronAPI.workspace.createFile(name, defaultContent);
         if (res.success) {
           const ext = name.split('.').pop().toLowerCase();
           const lang = ['ino', 'cpp', 'c', 'h', 'hpp'].includes(ext) ? 'cpp' : ext === 'json' ? 'json' : 'plaintext';
@@ -439,7 +479,7 @@ export default function IdeLayout({ diagnosticComponent }) {
 
     if (typeof window !== 'undefined' && window.electronAPI?.workspace?.renameFile && workspacePath) {
       try {
-        const res = await window.electronAPI.workspace.renameFile({ oldPath: oldName, newPath: newName });
+        const res = await window.electronAPI.workspace.renameFile(oldName, newName);
         if (res.success) {
           setFiles((prev) =>
             prev.map((f) => (f.name === oldName ? { ...f, name: newName, path: res.newPath || newName } : f))
@@ -487,7 +527,7 @@ export default function IdeLayout({ diagnosticComponent }) {
 
     if (typeof window !== 'undefined' && window.electronAPI?.workspace?.deleteFile && workspacePath) {
       try {
-        const res = await window.electronAPI.workspace.deleteFile({ filePath: name });
+        const res = await window.electronAPI.workspace.deleteFile(name);
         if (res.success) {
           setFiles((prev) => prev.filter((f) => f.name !== name));
           handleCloseTab(name);
@@ -525,11 +565,9 @@ export default function IdeLayout({ diagnosticComponent }) {
     if (typeof window !== 'undefined' && window.electronAPI?.workspace?.saveProjectMetadata && workspacePath && boardObj) {
       try {
         await window.electronAPI.workspace.saveProjectMetadata({
-          metadata: {
-            board: boardObj.name,
-            boardId: boardObj.id,
-            targetFqbn: boardObj.fqbn
-          }
+          board: boardObj.name,
+          boardId: boardObj.id,
+          targetFqbn: boardObj.fqbn
         });
         setTaskLogs((prev) => [
           { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Updated board configuration in circuitsage.json to '${boardObj.name}'.` },
@@ -605,7 +643,7 @@ export default function IdeLayout({ diagnosticComponent }) {
     // In Electron workspace, create safety backup before applying diff
     if (typeof window !== 'undefined' && window.electronAPI?.workspace?.createBackup && workspacePath) {
       try {
-        const backupRes = await window.electronAPI.workspace.createBackup({ filePath: diff.file });
+        const backupRes = await window.electronAPI.workspace.createBackup(diff.file);
         if (backupRes.success) {
           setAppliedBackupId(backupRes.backupId);
           setTaskLogs((prev) => [
@@ -644,9 +682,9 @@ export default function IdeLayout({ diagnosticComponent }) {
   async function handleRevertAiDiff(backupId) {
     if (typeof window !== 'undefined' && window.electronAPI?.workspace?.revertFile && workspacePath && backupId) {
       try {
-        const res = await window.electronAPI.workspace.revertFile({ filePath: activeFileName, backupId });
+        const res = await window.electronAPI.workspace.revertFile(activeFileName, backupId);
         if (res.success) {
-          const readRes = await window.electronAPI.workspace.readFile({ filePath: activeFileName });
+          const readRes = await window.electronAPI.workspace.readFile(activeFileName);
           if (readRes.success) {
             setFiles((prev) =>
               prev.map((f) => (f.name === activeFileName ? { ...f, content: readRes.content, mtime: readRes.mtime } : f))
@@ -799,31 +837,197 @@ export default function IdeLayout({ diagnosticComponent }) {
     }
   }, [activeFileName, currentBoardObj, fileContent]);
 
-  function handleUpload() {
-    setIsUploading(true);
-    setBottomTab('output');
-    setBuildOutput((prev) => prev + `\n[Flash Tool] Connecting to target on ${selectedPort}...\n`);
+  // =========================================================================
+  // REAL FIRMWARE UPLOAD (WITH APPROVAL & CIRCUIT DISCLAIMER)
+  // =========================================================================
 
-    setTimeout(() => {
-      setBuildOutput(
-        (prev) =>
-          prev +
-          `[Flash Tool] Chip: ESP32-D0WDQ6 (revision 1)\n` +
-          `[Flash Tool] Features: WiFi, BT, Dual Core, 240MHz\n` +
-          `[Flash Tool] Writing flash at 460800 baud: 100% complete\n` +
-          `[Flash Tool] Hard resetting via RTS pin...\n` +
-          `[SUCCESS] Firmware running on ${selectedBoardId}.\n`
-      );
-      setIsUploading(false);
-    }, 1800);
+  function handleTriggerUploadModal() {
+    setShowUploadModal(true);
   }
 
-  function handleSendSerial(text) {
+  async function handleExecuteUpload() {
+    setShowUploadModal(false);
+    setIsUploading(true);
+    setBuildState('building');
+    setBottomTab('output');
+    setBuildOutput(
+      `⚡ Preparing firmware upload...\n` +
+      `Target Board: ${currentBoardObj.name} (${currentBoardObj.fqbn})\n` +
+      `Target Port: ${selectedPort}\n` +
+      `[Notice] Serial monitor will automatically pause during upload and resume upon completion.\n`
+    );
+
+    const startTime = Date.now();
+
+    if (typeof window !== 'undefined' && window.electronAPI?.toolchain?.upload) {
+      try {
+        const payload = {
+          sketchPath: activeFileName,
+          fqbn: currentBoardObj.fqbn || 'esp32:esp32:esp32cam',
+          port: selectedPort,
+          userApproved: true
+        };
+
+        const res = await window.electronAPI.toolchain.upload(payload);
+        const duration = (res.durationMs / 1000).toFixed(2);
+
+        if (res.success) {
+          setBuildState('success');
+          setBuildResult({ ...res, isUpload: true });
+          setProblems([]);
+          setBuildOutput(
+            (res.stdout || '') +
+            `\n========================================\n` +
+            `[SUCCESS] Firmware uploaded successfully in ${duration}s.\n` +
+            `[CIRCUIT NOTICE] ${res.disclaimer}\n`
+          );
+        } else {
+          setBuildState('failed');
+          setBuildResult({ ...res, isUpload: true });
+          setBuildOutput(
+            (res.stderr || res.stdout || '') +
+            `\n========================================\n` +
+            `[ERROR] Firmware upload failed with exit code ${res.exitCode}.\n` +
+            `[NOTICE] ${res.disclaimer}\n`
+          );
+        }
+      } catch (err) {
+        setBuildState('failed');
+        setBuildOutput(`[IPC Error] Failed to execute firmware upload: ${err.message}\n`);
+      } finally {
+        setIsUploading(false);
+      }
+    } else {
+      // Browser demonstration simulation
+      setTimeout(() => {
+        const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+        const disclaimer = 'Firmware uploaded successfully to flash memory. NOTE: Flash verification confirms program memory write, but does not prove circuit connections, sensors, or external components are functional.';
+        const fakeUpload = {
+          success: true,
+          exitCode: 0,
+          durationMs: 2450,
+          isUpload: true,
+          disclaimer,
+          stdout:
+            `[Flash Tool] Connecting to target on ${selectedPort}...\n` +
+            `[Flash Tool] Chip is ESP32-D0WDQ6 (revision 1)\n` +
+            `[Flash Tool] Features: WiFi, BT, Dual Core, 240MHz\n` +
+            `[Flash Tool] MAC: 24:6f:28:a1:b2:c3\n` +
+            `[Flash Tool] Uploading stub...\n` +
+            `[Flash Tool] Running stub...\n` +
+            `[Flash Tool] Configuring flash size: 4MB (DIO, 40MHz)\n` +
+            `[Flash Tool] Compressed 267488 bytes to 142104...\n` +
+            `[Flash Tool] Writing at 0x00010000... (100%)\n` +
+            `[Flash Tool] Wrote 267488 bytes at 0x00010000 in 2.1 seconds\n` +
+            `[Flash Tool] Hash of data verified.\n` +
+            `[Flash Tool] Hard resetting via RTS pin...\n`,
+          stderr: '',
+          diagnostics: []
+        };
+
+        setBuildState('success');
+        setBuildResult(fakeUpload);
+        setBuildOutput(
+          fakeUpload.stdout +
+          `\n========================================\n` +
+          `[SUCCESS] Firmware uploaded successfully in ${duration}s.\n` +
+          `[CIRCUIT NOTICE] ${disclaimer}\n`
+        );
+        setIsUploading(false);
+      }, 1800);
+    }
+  }
+
+  // =========================================================================
+  // SERIAL MONITOR HANDLERS
+  // =========================================================================
+
+  async function handleToggleConnectSerial() {
+    if (typeof window !== 'undefined' && window.electronAPI?.hardware?.connectSerial) {
+      if (isSerialConnected) {
+        await window.electronAPI.hardware.disconnectSerial();
+        setIsSerialConnected(false);
+        setTaskLogs((prev) => [
+          { time: new Date().toLocaleTimeString(), source: 'Serial', message: `Disconnected from ${selectedPort}.` },
+          ...prev
+        ]);
+      } else {
+        const res = await window.electronAPI.hardware.connectSerial({
+          port: selectedPort,
+          baudRate
+        });
+        if (res.success) {
+          setIsSerialConnected(true);
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'Serial', message: `Connected to ${selectedPort} at ${baudRate} baud.` },
+            ...prev
+          ]);
+        } else {
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'Serial', message: `Serial connect failed: ${res.message || res.error}` },
+            ...prev
+          ]);
+          alert(`Serial connection failed: ${res.message || res.error}`);
+        }
+      }
+    } else {
+      setIsSerialConnected(!isSerialConnected);
+    }
+  }
+
+  async function handleSendSerial(text, lineEnd = lineEnding) {
     const time = new Date().toLocaleTimeString();
+    if (typeof window !== 'undefined' && window.electronAPI?.hardware?.sendSerial && isSerialConnected) {
+      await window.electronAPI.hardware.sendSerial({ text, lineEnding: lineEnd });
+    }
     setSerialLogs((prev) => [
       ...prev,
-      { time, text: `> ${text}`, isSend: true },
-      { time, text: `ESP32-CAM [Echo]: Command '${text}' received`, isEcho: true }
+      { time, text: `> ${text}`, isSend: true }
+    ]);
+  }
+
+  async function handleSaveSerialLog() {
+    if (serialLogs.length === 0) {
+      alert('No serial telemetry data available to save.');
+      return;
+    }
+
+    const content = serialLogs.map((l) => `[${l.time}] ${l.text}`).join('\n');
+    if (typeof window !== 'undefined' && window.electronAPI?.hardware?.saveSerialLog && workspacePath) {
+      try {
+        const res = await window.electronAPI.hardware.saveSerialLog({
+          fileName: `serial_${selectedPort.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.log`,
+          content
+        });
+        if (res.success) {
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'Serial', message: `Saved serial log to '${res.savedPath}'.` },
+            ...prev
+          ]);
+          alert(`Serial session log saved to:\n${res.savedPath}`);
+        }
+      } catch (err) {
+        alert(`Failed to save serial log: ${err.message}`);
+      }
+    } else {
+      const blob = new Blob([content], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `serial_${selectedPort}.log`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function handleToggleAiAuthorization(auth) {
+    setAiAuthorized(auth);
+    if (typeof window !== 'undefined' && window.electronAPI?.hardware?.setAiAuthorization) {
+      await window.electronAPI.hardware.setAiAuthorization({ authorized: auth });
+    }
+    setTaskLogs((prev) => [
+      { time: new Date().toLocaleTimeString(), source: 'Privacy', message: auth ? 'Telemetry sharing with AI Assistant enabled.' : 'Telemetry sharing with AI Assistant disabled.' },
+      ...prev
     ]);
   }
 
@@ -840,7 +1044,7 @@ export default function IdeLayout({ diagnosticComponent }) {
         onSelectPort={setSelectedPort}
         onBuild={handleBuild}
         isBuilding={isBuilding}
-        onUpload={handleUpload}
+        onUpload={handleTriggerUploadModal}
         isUploading={isUploading}
         aiStatus="ready"
         onToggleLeftSidebar={() => setLeftCollapsed(!leftCollapsed)}
@@ -934,6 +1138,7 @@ export default function IdeLayout({ diagnosticComponent }) {
                 buildOutput={buildOutput}
                 buildResult={buildResult}
                 isBuilding={isBuilding}
+                isUploading={isUploading}
                 serialLogs={serialLogs}
                 onSendSerial={handleSendSerial}
                 onClearSerial={() => setSerialLogs([])}
@@ -942,6 +1147,13 @@ export default function IdeLayout({ diagnosticComponent }) {
                 onChangeBaudRate={setBaudRate}
                 taskLogs={taskLogs}
                 onClosePanel={() => setBottomCollapsed(true)}
+                isSerialConnected={isSerialConnected}
+                onToggleConnectSerial={handleToggleConnectSerial}
+                lineEnding={lineEnding}
+                onChangeLineEnding={setLineEnding}
+                onSaveSerialLog={handleSaveSerialLog}
+                aiAuthorized={aiAuthorized}
+                onToggleAiAuthorization={handleToggleAiAuthorization}
               />
             </div>
           )}
@@ -1101,6 +1313,73 @@ export default function IdeLayout({ diagnosticComponent }) {
                 className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-semibold shadow-md shadow-blue-600/30"
               >
                 Create Project
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Explicit Firmware Upload Approval Modal */}
+      {showUploadModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 font-mono">
+          <div className="bg-slate-900 border border-blue-500/50 rounded-xl p-5 max-w-md w-full shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-6 h-6 rounded bg-amber-600 flex items-center justify-center text-xs text-white">⚡</span>
+                <h3 className="font-semibold text-slate-100 text-sm">Approve Firmware Flash</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUploadModal(false)}
+                className="text-slate-400 hover:text-slate-200 text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="p-3 rounded-lg bg-slate-950 border border-slate-800 space-y-1.5">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Target Board:</span>
+                  <span className="text-blue-300 font-semibold">{currentBoardObj.name}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Target FQBN:</span>
+                  <span className="text-slate-200">{currentBoardObj.fqbn}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Target Port:</span>
+                  <span className="text-emerald-300 font-semibold">{selectedPort}</span>
+                </div>
+              </div>
+
+              {/* Board Specific Note */}
+              {currentBoardObj.notes && (
+                <div className="p-2.5 rounded bg-amber-950/40 border border-amber-800/60 text-amber-200 text-[11px]">
+                  <strong>Hardware Flashing Instructions:</strong>
+                  <p className="mt-1">{currentBoardObj.notes}</p>
+                </div>
+              )}
+
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Flashing will program the microcontroller flash memory. The Serial Monitor will automatically pause during upload and resume once completed.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowUploadModal(false)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteUpload}
+                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-md shadow-blue-600/30 flex items-center gap-1.5"
+              >
+                <span>⚡ Approve & Flash Firmware</span>
               </button>
             </div>
           </div>

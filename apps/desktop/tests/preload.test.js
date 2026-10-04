@@ -66,16 +66,36 @@ describe('Desktop Preload API Security Verification', () => {
     ]);
   });
 
+  it('should verify hardware operations are restricted to approved methods', () => {
+    const hardwareMethods = Object.keys(exposedApiValue.hardware);
+    expect(hardwareMethods.sort()).toEqual([
+      'clearSerialLogs',
+      'connectSerial',
+      'disconnectSerial',
+      'getSerialLogs',
+      'getSerialState',
+      'listPorts',
+      'onSerialData',
+      'onSerialError',
+      'onSerialStateChanged',
+      'saveSerialLog',
+      'sendSerial',
+      'setAiAuthorization'
+    ]);
+  });
+
   it('should verify toolchain operations are restricted to approved methods', () => {
     const toolchainMethods = Object.keys(exposedApiValue.toolchain);
     expect(toolchainMethods.sort()).toEqual([
       'cancelCompile',
+      'cancelUpload',
       'checkStatus',
       'compile',
       'getPresets',
       'getSetupInstructions',
       'listBoards',
       'listCores',
+      'upload',
       'verifyPlatform'
     ]);
   });

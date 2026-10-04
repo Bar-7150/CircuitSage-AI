@@ -7,6 +7,7 @@ const appHandler = require('./appHandler');
 const workspaceHandler = require('./workspaceHandler');
 const hardwareHandler = require('./hardwareHandler');
 const toolchainHandler = require('./toolchainHandler');
+const { serialService } = require('../services/serialService');
 
 /**
  * Helper to safely wrap async IPC handlers with standard error envelope
@@ -57,10 +58,18 @@ function registerIpcHandlers(getMainWindow) {
   ipcMain.handle('workspace:getProjectMetadata', wrapHandler(workspaceHandler.handleGetProjectMetadata));
   ipcMain.handle('workspace:saveProjectMetadata', wrapHandler(workspaceHandler.handleSaveProjectMetadata));
 
-  // Hardware Discovery
+  // Hardware Discovery & Serial Communication
   ipcMain.handle('hardware:listPorts', wrapHandler(hardwareHandler.handleListPorts, 'HARDWARE_ERROR'));
+  ipcMain.handle('hardware:connectSerial', wrapHandler(hardwareHandler.handleConnectSerial, 'SERIAL_ERROR'));
+  ipcMain.handle('hardware:disconnectSerial', wrapHandler(hardwareHandler.handleDisconnectSerial, 'SERIAL_ERROR'));
+  ipcMain.handle('hardware:sendSerial', wrapHandler(hardwareHandler.handleSendSerial, 'SERIAL_ERROR'));
+  ipcMain.handle('hardware:getSerialState', wrapHandler(hardwareHandler.handleGetSerialState));
+  ipcMain.handle('hardware:clearSerialLogs', wrapHandler(hardwareHandler.handleClearSerialLogs));
+  ipcMain.handle('hardware:getSerialLogs', wrapHandler(hardwareHandler.handleGetSerialLogs));
+  ipcMain.handle('hardware:setAiAuthorization', wrapHandler(hardwareHandler.handleSetAiAuthorization));
+  ipcMain.handle('hardware:saveSerialLog', wrapHandler(hardwareHandler.handleSaveSerialLog, 'SERIAL_LOG_ERROR'));
 
-  // Toolchain & Build Operations
+  // Toolchain, Embedded Build & Firmware Upload Operations
   ipcMain.handle('toolchain:checkStatus', wrapHandler(toolchainHandler.handleCheckStatus, 'TOOLCHAIN_ERROR'));
   ipcMain.handle('toolchain:getSetupInstructions', wrapHandler(toolchainHandler.handleGetSetupInstructions));
   ipcMain.handle('toolchain:listCores', wrapHandler(toolchainHandler.handleListCores, 'TOOLCHAIN_ERROR'));
@@ -68,7 +77,31 @@ function registerIpcHandlers(getMainWindow) {
   ipcMain.handle('toolchain:verifyPlatform', wrapHandler(toolchainHandler.handleVerifyPlatform, 'TOOLCHAIN_ERROR'));
   ipcMain.handle('toolchain:compile', wrapHandler(toolchainHandler.handleCompile, 'COMPILATION_ERROR'));
   ipcMain.handle('toolchain:cancelCompile', wrapHandler(toolchainHandler.handleCancelCompile, 'COMPILATION_ERROR'));
+  ipcMain.handle('toolchain:upload', wrapHandler(toolchainHandler.handleUpload, 'UPLOAD_ERROR'));
+  ipcMain.handle('toolchain:cancelUpload', wrapHandler(toolchainHandler.handleCancelUpload, 'UPLOAD_ERROR'));
   ipcMain.handle('toolchain:getPresets', wrapHandler(toolchainHandler.handleGetPresets));
+
+  // Stream data from serialService to renderer window
+  serialService.onData((text) => {
+    const win = getMainWindow ? getMainWindow() : null;
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('hardware:serialData', text);
+    }
+  });
+
+  serialService.onState((state) => {
+    const win = getMainWindow ? getMainWindow() : null;
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('hardware:serialStateChanged', state);
+    }
+  });
+
+  serialService.onError((err) => {
+    const win = getMainWindow ? getMainWindow() : null;
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('hardware:serialError', err);
+    }
+  });
 }
 
 module.exports = {
