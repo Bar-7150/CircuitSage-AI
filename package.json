@@ -1,0 +1,27 @@
+{
+  "name": "circuitsage-ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Offline-first, open-weight AI electronics debugging assistant",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "dev": "npm run dev:api",
+    "test:api": "npm test --workspace=apps/api",
+    "test:web": "npm test --workspace=apps/web",
+    "test": "npm run test:api",
+    "lint:api": "npm run lint --workspace=apps/api",
+    "lint:web": "npm run lint --workspace=apps/web",
+    "lint": "npm run lint:api && npm run lint:web"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0"
+  },
+  "engines": {
+    "node": ">=18.17.0"
+  }
+}
