@@ -1,12 +1,14 @@
 /**
- * CircuitSage AI — Authentication Middleware
+ * CircuitSage AI — Authentication & Authorization Middleware
  *
  * Verifies Supabase Auth JWT access tokens independently in Express.
  * Strictly derives authenticated identity from the verified token,
  * never trusting a user ID supplied in the request body.
+ * Enforces record ownership checks before reading or modifying private records.
  */
 
 const { anonClient, createUserScopedClient, isConfigured } = require('../lib/supabaseClient');
+const caseRepository = require('../db/caseRepository');
 const { ERROR_CODES } = require('@circuitsage/shared');
 
 /**
@@ -40,20 +42,25 @@ async function requireAuth(req, res, next) {
     });
   }
 
-  // If live Supabase credentials are not configured, handle development/test mocking
+  // Handle mock tokens in test environment
   if (!isConfigured || !anonClient) {
-    // In test environment or unconfigured local mode, reject mock unless in explicit test mock header
-    if (process.env.NODE_ENV === 'test' && token === 'valid-test-token') {
-      req.user = { id: 'test-user-uuid-1234', email: 'test@circuitsage.local' };
-      req.token = token;
-      return next();
+    if (process.env.NODE_ENV === 'test') {
+      if (token === 'valid-test-token') {
+        req.user = { id: 'test-user-uuid-1234', email: 'test@circuitsage.local' };
+        req.token = token;
+        return next();
+      } else if (token === 'other-user-token') {
+        req.user = { id: 'other-user-uuid-5678', email: 'other@circuitsage.local' };
+        req.token = token;
+        return next();
+      }
     }
 
-    return res.status(503).json({
+    return res.status(401).json({
       error: {
-        code: ERROR_CODES.DATABASE_ERROR,
-        message: 'Supabase authentication service is not configured with live credentials.',
-        details: [{ hint: 'Check SUPABASE_URL and SUPABASE_ANON_KEY in apps/api/.env' }],
+        code: ERROR_CODES.UNAUTHORIZED,
+        message: 'Invalid, expired, or revoked Supabase access token.',
+        details: [],
         requestId: req.id || 'unknown'
       }
     });
@@ -73,15 +80,12 @@ async function requireAuth(req, res, next) {
       });
     }
 
-    // Securely derive identity strictly from the verified token
     req.user = {
       id: data.user.id,
       email: data.user.email,
       role: data.user.role
     };
     req.token = token;
-
-    // Attach user-scoped Supabase client for RLS enforcement in downstream handlers
     req.userClient = createUserScopedClient(token);
 
     next();
@@ -109,8 +113,16 @@ async function optionalAuth(req, res, next) {
   }
 
   if (!isConfigured || !anonClient) {
-    if (process.env.NODE_ENV === 'test' && token === 'valid-test-token') {
-      req.user = { id: 'test-user-uuid-1234', email: 'test@circuitsage.local' };
+    if (process.env.NODE_ENV === 'test') {
+      if (token === 'valid-test-token') {
+        req.user = { id: 'test-user-uuid-1234', email: 'test@circuitsage.local' };
+        req.token = token;
+      } else if (token === 'other-user-token') {
+        req.user = { id: 'other-user-uuid-5678', email: 'other@circuitsage.local' };
+        req.token = token;
+      } else {
+        req.user = null;
+      }
     } else {
       req.user = null;
     }
@@ -137,7 +149,52 @@ async function optionalAuth(req, res, next) {
   next();
 }
 
+/**
+ * Middleware: Verifies record ownership before allowing read or mutation of private diagnostic cases.
+ * Returns 404 if case does not exist, 403 if case belongs to another user.
+ */
+async function checkCaseOwnership(req, res, next) {
+  const caseId = req.params.id;
+  const userId = req.user ? req.user.id : null;
+
+  try {
+    const { exists, isOwner, caseItem } = await caseRepository.checkOwnership({
+      id: caseId,
+      userId,
+      userClient: req.userClient
+    });
+
+    if (!exists) {
+      return res.status(404).json({
+        error: {
+          code: ERROR_CODES.RESOURCE_NOT_FOUND,
+          message: `Diagnostic case ${caseId} not found.`,
+          details: [{ field: 'id', issue: 'Resource not found in database.' }],
+          requestId: req.id || 'unknown'
+        }
+      });
+    }
+
+    if (!isOwner) {
+      return res.status(403).json({
+        error: {
+          code: ERROR_CODES.FORBIDDEN,
+          message: 'Forbidden. You do not have permission to access or modify this diagnostic case.',
+          details: [{ field: 'user_id', issue: 'Caller does not own this private record.' }],
+          requestId: req.id || 'unknown'
+        }
+      });
+    }
+
+    req.caseItem = caseItem;
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
 module.exports = {
   requireAuth,
-  optionalAuth
+  optionalAuth,
+  checkCaseOwnership
 };
