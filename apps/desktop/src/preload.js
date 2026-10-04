@@ -75,6 +75,20 @@ const electronAPI = {
     upload: (payload) => ipcRenderer.invoke('toolchain:upload', payload),
     cancelUpload: (uploadId) => ipcRenderer.invoke('toolchain:cancelUpload', uploadId),
     getPresets: () => ipcRenderer.invoke('toolchain:getPresets')
+  },
+
+  // Controlled Embedded Development Agent Operations
+  agent: {
+    runTask: (payload) => ipcRenderer.invoke('agent:runTask', payload),
+    cancelTask: () => ipcRenderer.invoke('agent:cancelTask'),
+    approvePatch: (patchId) => ipcRenderer.invoke('agent:approvePatch', { patchId }),
+    rejectPatch: (patchId) => ipcRenderer.invoke('agent:rejectPatch', { patchId }),
+    getCapabilities: () => ipcRenderer.invoke('agent:getCapabilities'),
+    onEvent: (callback) => {
+      const listener = (_e, val) => callback(val);
+      ipcRenderer.on('agent:event', listener);
+      return () => ipcRenderer.removeListener('agent:event', listener);
+    }
   }
 };
 

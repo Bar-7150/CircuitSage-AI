@@ -52,10 +52,22 @@ const SERIAL_BAUD_RATES = [
   921600
 ];
 
+const { EmbeddedAgentEngine, AGENT_STATES } = require('./agent/agentEngine');
+const { TOOL_DEFINITIONS, validateToolCall, createToolContext } = require('./agent/agentTools');
+const { ModelProvider, GemmaModelProvider } = require('./agent/modelProvider');
+
 module.exports = {
   EPISTEMIC_STATUS,
   ERROR_CODES,
   SUPPORTED_BOARDS,
   BOARD_FQBNS,
-  SERIAL_BAUD_RATES
+  SERIAL_BAUD_RATES,
+  EmbeddedAgentEngine,
+  AGENT_STATES,
+  TOOL_DEFINITIONS,
+  validateToolCall,
+  createToolContext,
+  ModelProvider,
+  GemmaModelProvider
 };
+

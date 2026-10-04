@@ -10,7 +10,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 export default function IdeRightSidebar({
   activeFile,
@@ -30,8 +30,8 @@ export default function IdeRightSidebar({
     {
       id: 'msg-1',
       sender: 'agent',
-      role: 'Gemma 4 Electronics Engineer',
-      text: 'CircuitSage AI assistant ready. I am actively inspecting your sketch for ESP32 / ESP32-CAM pin conflicts, logic voltage mismatches, and memory constraints.',
+      role: 'CircuitSage Embedded Agent',
+      text: 'Controlled Embedded Development Agent ready. Request firmware tasks (e.g. DHT22 sensing, Wi-Fi connectivity, MQTT telemetry, or compile error analysis) and I will plan changes, verify pinouts, stage diffs, and inspect build diagnostics upon approval.',
       timestamp: 'Just now'
     }
   ]);
@@ -45,16 +45,32 @@ export default function IdeRightSidebar({
   ]);
 
   // Proposed AI Diff
-  const [proposedDiff, setProposedDiff] = useState({
-    file: 'esp32_cam_blink.ino',
-    summary: 'Add watchdog timer reset and protect Flash LED pin from high duty cycle overheating',
-    oldSnippet: `void loop() {\n  digitalWrite(FLASH_LED_PIN, HIGH);\n  delay(500);\n}`,
-    newSnippet: `void loop() {\n  // Safe flash pulse with duty cycle protection\n  digitalWrite(FLASH_LED_PIN, HIGH);\n  delay(100); // Reduced from 500ms to prevent thermal throttling\n  digitalWrite(FLASH_LED_PIN, LOW);\n}`
-  });
-
+  const [proposedDiff, setProposedDiff] = useState(null);
   const [diffStatus, setDiffStatus] = useState('pending'); // 'pending' | 'accepted' | 'rejected'
 
-  function handleSendMessage(e) {
+  // Subscribe to live agent events if in Electron desktop
+  useEffect(() => {
+    if (typeof window !== 'undefined' && window.electronAPI?.agent?.onEvent) {
+      const unsubscribe = window.electronAPI.agent.onEvent(({ type, payload }) => {
+        if (type === 'plan_generated' && payload?.plan) {
+          setTaskPlan(payload.plan.map((s, idx) => ({
+            id: s.id || idx + 1,
+            title: s.title,
+            tool: s.tool,
+            requiresApproval: s.requiresApproval,
+            completed: s.status === 'completed'
+          })));
+        } else if (type === 'plan_updated' && payload?.step) {
+          setTaskPlan((prev) =>
+            prev.map((s) => (s.tool === payload.step.tool ? { ...s, completed: payload.step.status === 'completed' } : s))
+          );
+        }
+      });
+      return unsubscribe;
+    }
+  }, []);
+
+  async function handleSendMessage(e) {
     if (e) e.preventDefault();
     const query = chatInput.trim();
     if (!query) return;
@@ -64,52 +80,145 @@ export default function IdeRightSidebar({
       sender: 'user',
       role: 'User',
       text: query,
-      timestamp: 'Just now'
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
     setMessages((prev) => [...prev, userMsg]);
     setChatInput('');
     setIsAiThinking(true);
 
-    // Realistic offline engineering reasoning response
-    setTimeout(() => {
-      let replyText = '';
-      if (query.toLowerCase().includes('cam') || query.toLowerCase().includes('camera')) {
-        replyText =
-          'On the AI Thinker ESP32-CAM, GPIO 4 controls the high-power flash LED. Note that pulling GPIO 4 HIGH draws up to 200mA, which will drop your VDD below 3.0V if your power supply cannot provide at least 2A. Always isolate the camera power plane.';
-      } else if (query.toLowerCase().includes('pin') || query.toLowerCase().includes('gpio')) {
-        replyText =
-          'ESP32 GPIOs operate strictly on 3.3V logic with a maximum recommended current limit of 12mA per pin. Ensure pins 6-11 are NEVER used for external components as they are wired directly to integrated SPI flash memory.';
+    try {
+      let report = null;
+
+      // 1. Electron Desktop IPC Agent
+      if (typeof window !== 'undefined' && window.electronAPI?.agent) {
+        const res = await window.electronAPI.agent.runTask({
+          prompt: query,
+          context: {
+            selectedBoard,
+            activeFile,
+            activeFileContent: fileContent
+          }
+        });
+        if (res.report) {
+          report = res.report;
+        }
       } else {
-        replyText = `Analysis for ${selectedBoard?.name || 'ESP32'}: Your sketch structure conforms to standard Arduino setup() and loop() lifecycles. I recommend enabling the serial monitor baud rate at 115200 to capture hardware crash dumps.`;
+        // 2. Fallback to API endpoint
+        const res = await fetch('http://127.0.0.1:8000/api/v1/agent/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: query,
+            context: {
+              selectedBoard,
+              activeFile,
+              activeFileContent: fileContent
+            }
+          })
+        });
+        if (res.ok) {
+          const body = await res.json();
+          report = body.data;
+        }
       }
 
-      const agentReply = {
-        id: `reply-${Date.now()}`,
-        sender: 'agent',
-        role: 'Gemma 4 Electronics Engineer',
-        text: replyText,
-        timestamp: 'Just now'
-      };
+      if (report) {
+        // Update task plan from agent report
+        if (Array.isArray(report.plan) && report.plan.length > 0) {
+          setTaskPlan(report.plan.map((s, idx) => ({
+            id: s.id || idx + 1,
+            title: s.title,
+            tool: s.tool,
+            requiresApproval: s.requiresApproval,
+            completed: s.status === 'completed'
+          })));
+        }
 
-      setMessages((prev) => [...prev, agentReply]);
+        // Update proposed diffs
+        if (Array.isArray(report.proposedPatches) && report.proposedPatches.length > 0) {
+          const firstPatch = report.proposedPatches[0];
+          setProposedDiff({
+            id: firstPatch.id,
+            file: firstPatch.file,
+            summary: firstPatch.summary,
+            oldSnippet: firstPatch.oldSnippet,
+            newSnippet: firstPatch.newSnippet
+          });
+          setDiffStatus(firstPatch.status === 'APPLIED' ? 'accepted' : 'pending');
+          setActiveTab('diffs'); // Surface diff to user for review
+        }
+
+        // Build structured agent reply message
+        let agentText = `**Status:** ${report.status}\n\n`;
+        if (report.uncertainties && report.uncertainties.length > 0) {
+          agentText += `**⚠️ Missing Requirements & Uncertainties:**\n${report.uncertainties.map((u) => `• ${u}`).join('\n')}\n\n`;
+        }
+        if (report.completedActions && report.completedActions.length > 0) {
+          agentText += `**✓ Completed Actions:**\n${report.completedActions.map((a) => `• ${a}`).join('\n')}\n\n`;
+        }
+        if (report.hardwareRecommendations && report.hardwareRecommendations.length > 0) {
+          agentText += `**💡 Recommendations:**\n${report.hardwareRecommendations.map((r) => `• ${r}`).join('\n')}\n\n`;
+        }
+        if (report.proposedPatches && report.proposedPatches.length > 0) {
+          agentText += `*Proposed ${report.proposedPatches.length} reviewable code patch(es). Check the Diffs tab to accept or reject.*`;
+        }
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `reply-${Date.now()}`,
+            sender: 'agent',
+            role: 'CircuitSage Embedded Agent',
+            text: agentText.trim(),
+            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+          }
+        ]);
+      }
+    } catch (err) {
+      console.error('[Agent Error]:', err);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `reply-${Date.now()}`,
+          sender: 'agent',
+          role: 'CircuitSage Embedded Agent',
+          text: `Error executing agent task: ${err.message}`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        }
+      ]);
+    } finally {
       setIsAiThinking(false);
-    }, 700);
+    }
   }
 
-  function handleAcceptDiff() {
+  async function handleAcceptDiff() {
     setDiffStatus('accepted');
+    if (proposedDiff?.id && typeof window !== 'undefined' && window.electronAPI?.agent) {
+      try {
+        await window.electronAPI.agent.approvePatch(proposedDiff.id);
+      } catch (err) {
+        console.warn('Could not approve patch via IPC:', err.message);
+      }
+    }
     if (onApplyDiff && proposedDiff) {
       onApplyDiff(proposedDiff);
     }
   }
 
-  function handleRejectDiff() {
+  async function handleRejectDiff() {
     setDiffStatus('rejected');
+    if (proposedDiff?.id && typeof window !== 'undefined' && window.electronAPI?.agent) {
+      try {
+        await window.electronAPI.agent.rejectPatch(proposedDiff.id);
+      } catch (err) {
+        console.warn('Could not reject patch via IPC:', err.message);
+      }
+    }
   }
 
   const completedCount = taskPlan.filter((t) => t.completed).length;
-  const progressPercent = Math.round((completedCount / taskPlan.length) * 100);
+  const progressPercent = taskPlan.length > 0 ? Math.round((completedCount / taskPlan.length) * 100) : 0;
 
   return (
     <aside
@@ -199,6 +308,13 @@ export default function IdeRightSidebar({
 
           {/* Quick Prompt Presets */}
           <div className="px-3 py-1.5 border-t border-slate-800/80 bg-slate-900/40 flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={() => setChatInput('Create ESP32 firmware to read a DHT22 on GPIO 4, connect to Wi-Fi, and publish readings to an MQTT broker.')}
+              className="text-[10px] px-2 py-0.5 rounded bg-blue-950/60 hover:bg-blue-900/80 text-blue-200 border border-blue-800/80 font-mono font-medium"
+            >
+              + ESP32 DHT22 MQTT Firmware
+            </button>
             <button
               type="button"
               onClick={() => setChatInput('Check ESP32-CAM GPIO 4 pin conflict with Wi-Fi')}

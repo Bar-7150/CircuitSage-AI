@@ -15,6 +15,7 @@ const healthRoutes = require('./routes/health');
 const diagnosesRoutes = require('./routes/diagnoses');
 const knowledgeRoutes = require('./routes/knowledge');
 const feedbackRoutes = require('./routes/feedback');
+const agentRoutes = require('./routes/agent');
 
 const app = express();
 
@@ -40,6 +41,7 @@ app.use(config.apiPrefix, healthRoutes);
 app.use(config.apiPrefix, diagnosesRoutes);
 app.use(config.apiPrefix, knowledgeRoutes);
 app.use(config.apiPrefix, feedbackRoutes);
+app.use(config.apiPrefix, agentRoutes);
 
 // 404 Handler for unmatched routes
 app.use(notFoundHandler);

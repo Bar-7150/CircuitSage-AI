@@ -41,9 +41,21 @@ describe('Desktop Preload API Security Verification', () => {
     expect(typeof exposedApiValue).toBe('object');
   });
 
-  it('should expose ONLY approved functional namespaces (app, workspace, hardware, toolchain)', () => {
+  it('should expose ONLY approved functional namespaces (agent, app, hardware, toolchain, workspace)', () => {
     const exposedNamespaces = Object.keys(exposedApiValue);
-    expect(exposedNamespaces.sort()).toEqual(['app', 'hardware', 'toolchain', 'workspace']);
+    expect(exposedNamespaces.sort()).toEqual(['agent', 'app', 'hardware', 'toolchain', 'workspace']);
+  });
+
+  it('should verify agent operations are restricted to approved methods', () => {
+    const agentMethods = Object.keys(exposedApiValue.agent);
+    expect(agentMethods.sort()).toEqual([
+      'approvePatch',
+      'cancelTask',
+      'getCapabilities',
+      'onEvent',
+      'rejectPatch',
+      'runTask'
+    ]);
   });
 
   it('should verify workspace operations are restricted to approved methods', () => {

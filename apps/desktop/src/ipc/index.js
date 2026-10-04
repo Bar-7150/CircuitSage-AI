@@ -7,6 +7,7 @@ const appHandler = require('./appHandler');
 const workspaceHandler = require('./workspaceHandler');
 const hardwareHandler = require('./hardwareHandler');
 const toolchainHandler = require('./toolchainHandler');
+const agentHandler = require('./agentHandler');
 const { serialService } = require('../services/serialService');
 
 /**
@@ -80,6 +81,14 @@ function registerIpcHandlers(getMainWindow) {
   ipcMain.handle('toolchain:upload', wrapHandler(toolchainHandler.handleUpload, 'UPLOAD_ERROR'));
   ipcMain.handle('toolchain:cancelUpload', wrapHandler(toolchainHandler.handleCancelUpload, 'UPLOAD_ERROR'));
   ipcMain.handle('toolchain:getPresets', wrapHandler(toolchainHandler.handleGetPresets));
+
+  // Controlled Embedded Development Agent Operations
+  agentHandler.setWindowGetter(getMainWindow);
+  ipcMain.handle('agent:runTask', wrapHandler(agentHandler.handleRunTask, 'AGENT_ERROR'));
+  ipcMain.handle('agent:cancelTask', wrapHandler(agentHandler.handleCancelTask, 'AGENT_ERROR'));
+  ipcMain.handle('agent:approvePatch', wrapHandler(agentHandler.handleApprovePatch, 'AGENT_ERROR'));
+  ipcMain.handle('agent:rejectPatch', wrapHandler(agentHandler.handleRejectPatch, 'AGENT_ERROR'));
+  ipcMain.handle('agent:getCapabilities', wrapHandler(agentHandler.handleGetCapabilities, 'AGENT_ERROR'));
 
   // Stream data from serialService to renderer window
   serialService.onData((text) => {
