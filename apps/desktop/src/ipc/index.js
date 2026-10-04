@@ -38,7 +38,7 @@ function registerIpcHandlers(getMainWindow) {
   ipcMain.handle('app:getStatus', wrapHandler(appHandler.handleGetStatus));
   ipcMain.handle('app:getVersion', wrapHandler(appHandler.handleGetVersion));
 
-  // Workspace Operations
+  // Workspace & Project File Operations
   ipcMain.handle('workspace:selectFolder', wrapHandler(async () => {
     const win = getMainWindow ? getMainWindow() : null;
     return await workspaceHandler.handleSelectFolder(win);
@@ -47,6 +47,15 @@ function registerIpcHandlers(getMainWindow) {
   ipcMain.handle('workspace:listFiles', wrapHandler(workspaceHandler.handleListFiles, 'WORKSPACE_ERROR'));
   ipcMain.handle('workspace:readFile', wrapHandler(workspaceHandler.handleReadFile, 'FILE_READ_ERROR'));
   ipcMain.handle('workspace:writeFile', wrapHandler(workspaceHandler.handleWriteFile, 'FILE_WRITE_ERROR'));
+  ipcMain.handle('workspace:saveFileSafe', wrapHandler(workspaceHandler.handleSaveFileSafe, 'FILE_SAVE_ERROR'));
+  ipcMain.handle('workspace:createFile', wrapHandler(workspaceHandler.handleCreateFile, 'FILE_CREATE_ERROR'));
+  ipcMain.handle('workspace:renameFile', wrapHandler(workspaceHandler.handleRenameFile, 'FILE_RENAME_ERROR'));
+  ipcMain.handle('workspace:deleteFile', wrapHandler(workspaceHandler.handleDeleteFile, 'FILE_DELETE_ERROR'));
+  ipcMain.handle('workspace:createBackup', wrapHandler(workspaceHandler.handleCreateBackup, 'BACKUP_ERROR'));
+  ipcMain.handle('workspace:revertFile', wrapHandler(workspaceHandler.handleRevertFile, 'REVERT_ERROR'));
+  ipcMain.handle('workspace:createProject', wrapHandler(workspaceHandler.handleCreateProject, 'PROJECT_CREATE_ERROR'));
+  ipcMain.handle('workspace:getProjectMetadata', wrapHandler(workspaceHandler.handleGetProjectMetadata));
+  ipcMain.handle('workspace:saveProjectMetadata', wrapHandler(workspaceHandler.handleSaveProjectMetadata));
 
   // Hardware Discovery
   ipcMain.handle('hardware:listPorts', wrapHandler(hardwareHandler.handleListPorts, 'HARDWARE_ERROR'));

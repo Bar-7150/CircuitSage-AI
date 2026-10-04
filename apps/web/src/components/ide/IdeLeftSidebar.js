@@ -18,9 +18,12 @@ export default function IdeLeftSidebar({
   activeFile,
   onSelectFile,
   onCreateFile,
+  onRenameFile,
   onDeleteFile,
   selectedBoard,
   onOpenWorkspaceFolder,
+  onNewProject,
+  projectMetadata,
   onTriggerCleanBuild,
   isBuilding
 }) {
@@ -28,6 +31,8 @@ export default function IdeLeftSidebar({
   const [searchTerm, setSearchTerm] = useState('');
   const [newFileName, setNewFileName] = useState('');
   const [showNewFileInput, setShowNewFileInput] = useState(false);
+  const [editingFileName, setEditingFileName] = useState(null);
+  const [renameInput, setRenameInput] = useState('');
 
   // Filter files by search term
   const filteredFiles = searchTerm.trim()
@@ -186,6 +191,43 @@ export default function IdeLeftSidebar({
             <div className="flex-1 overflow-y-auto py-1">
               {files.map((file) => {
                 const isSelected = activeFile === file.name;
+                const isEditing = editingFileName === file.name;
+
+                if (isEditing) {
+                  return (
+                    <form
+                      key={file.name}
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const trimmed = renameInput.trim();
+                        if (trimmed && trimmed !== file.name && onRenameFile) {
+                          onRenameFile(file.name, trimmed);
+                        }
+                        setEditingFileName(null);
+                      }}
+                      className="px-2 py-1 bg-slate-900 border-b border-slate-800 flex gap-1"
+                    >
+                      <input
+                        type="text"
+                        value={renameInput}
+                        onChange={(e) => setRenameInput(e.target.value)}
+                        className="flex-1 px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-slate-100 text-xs font-mono focus:outline-none"
+                        autoFocus
+                      />
+                      <button type="submit" className="px-1.5 py-0.5 rounded bg-blue-600 text-white text-[10px] font-mono">
+                        ✓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingFileName(null)}
+                        className="px-1 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px]"
+                      >
+                        ✕
+                      </button>
+                    </form>
+                  );
+                }
+
                 return (
                   <div
                     key={file.name}
@@ -206,22 +248,38 @@ export default function IdeLeftSidebar({
                       <span className="truncate">{file.name}</span>
                     </div>
 
-                    {/* Delete button (except main sketch) */}
-                    {!file.name.endsWith('.ino') && (
+                    <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100">
+                      {/* Rename button */}
                       <button
                         type="button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (confirm(`Delete '${file.name}'?`)) {
-                            onDeleteFile(file.name);
-                          }
+                          setEditingFileName(file.name);
+                          setRenameInput(file.name);
                         }}
-                        className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400 text-xs p-0.5 rounded"
-                        title="Delete file"
+                        className="text-slate-500 hover:text-blue-300 text-xs p-0.5 rounded"
+                        title="Rename file"
                       >
-                        ✕
+                        ✎
                       </button>
-                    )}
+
+                      {/* Delete button (except main sketch) */}
+                      {!file.name.endsWith('.ino') && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (confirm(`Delete '${file.name}'?`)) {
+                              onDeleteFile(file.name);
+                            }
+                          }}
+                          className="text-slate-500 hover:text-rose-400 text-xs p-0.5 rounded"
+                          title="Delete file"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -339,6 +397,15 @@ export default function IdeLeftSidebar({
             </span>
 
             <div className="space-y-2">
+              <button
+                type="button"
+                onClick={onNewProject}
+                className="w-full py-2 px-3 rounded-lg bg-blue-950/80 hover:bg-blue-900 text-blue-200 border border-blue-800 text-xs font-mono transition-colors text-left flex items-center justify-between"
+              >
+                <span>✨ New Project from Template</span>
+                <span className="text-[10px] text-blue-400">ESP32 / Uno</span>
+              </button>
+
               <button
                 type="button"
                 onClick={onTriggerCleanBuild}

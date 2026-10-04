@@ -1,11 +1,15 @@
 /**
- * CircuitSage AI — Desktop Workspace Security & IPC Validation Tests
+ * CircuitSage AI — Desktop Workspace Security & Real File Operations Tests
  *
- * Verifies that:
+ * Tested against the REAL local filesystem:
  * 1. Path traversal attacks (../, absolute out-of-bounds paths) are rejected.
  * 2. Sensitive directories and files (.git, .env, node_modules) are blocked.
  * 3. File extension whitelist is enforced (.ino, .cpp, .py vs .exe, .sh, .bat).
- * 4. Error messages match expected security error codes.
+ * 4. Safe file creation, reading, atomic saving, and conflict detection (mtime).
+ * 5. File renaming, deletion safety (workspace root deletion blocked).
+ * 6. Automated backups and reliable revert for AI-applied changes.
+ * 7. Project initialization from templates without overwriting existing files.
+ * 8. Project metadata persistence in circuitsage.json.
  */
 
 const path = require('path');
@@ -16,10 +20,19 @@ const {
   _setActiveWorkspaceForTesting,
   handleReadFile,
   handleWriteFile,
+  handleSaveFileSafe,
+  handleCreateFile,
+  handleRenameFile,
+  handleDeleteFile,
+  handleCreateBackup,
+  handleRevertFile,
+  handleCreateProject,
+  handleGetProjectMetadata,
+  handleSaveProjectMetadata,
   ALLOWED_EXTENSIONS
 } = require('../src/ipc/workspaceHandler');
 
-describe('Workspace Security and Boundary Isolation Tests', () => {
+describe('Workspace Security and Real File Operations Tests', () => {
   let tempWorkspaceDir;
 
   beforeAll(async () => {
@@ -133,6 +146,129 @@ describe('Workspace Security and Boundary Isolation Tests', () => {
       await expect(
         handleWriteFile(null, { filePath: dllPath, content: 'binary' })
       ).rejects.toThrow(/UNSUPPORTED_FILE_TYPE/);
+    });
+  });
+
+  describe('Real Filesystem Operations: Create, Rename, Delete, Conflict & Backup', () => {
+    it('creates a new permitted file and detects duplicate creation attempts', async () => {
+      const createRes = await handleCreateFile(null, {
+        relativePath: 'pins.h',
+        content: '#define LED 2'
+      });
+      expect(createRes.success).toBe(true);
+      expect(fs.existsSync(createRes.filePath)).toBe(true);
+
+      // Attempting to create again should fail with FILE_ALREADY_EXISTS
+      await expect(
+        handleCreateFile(null, { relativePath: 'pins.h', content: '' })
+      ).rejects.toThrow(/FILE_ALREADY_EXISTS/);
+    });
+
+    it('renames a file safely and prevents overwriting existing files', async () => {
+      const oldPath = path.join(tempWorkspaceDir, 'pins.h');
+      const newPath = path.join(tempWorkspaceDir, 'camera_pins.h');
+
+      const renameRes = await handleRenameFile(null, { oldPath, newPath });
+      expect(renameRes.success).toBe(true);
+      expect(fs.existsSync(oldPath)).toBe(false);
+      expect(fs.existsSync(newPath)).toBe(true);
+
+      // Renaming to already existing file should fail
+      await expect(
+        handleRenameFile(null, { oldPath: newPath, newPath: path.join(tempWorkspaceDir, 'sketch.ino') })
+      ).rejects.toThrow(/TARGET_EXISTS/);
+    });
+
+    it('deletes a file and strictly refuses to delete the workspace root', async () => {
+      const targetToDelete = path.join(tempWorkspaceDir, 'camera_pins.h');
+      const deleteRes = await handleDeleteFile(null, { filePath: targetToDelete });
+      expect(deleteRes.success).toBe(true);
+      expect(fs.existsSync(targetToDelete)).toBe(false);
+
+      // Must reject deleting the workspace root folder itself
+      await expect(
+        handleDeleteFile(null, { filePath: tempWorkspaceDir })
+      ).rejects.toThrow(/ACCESS_DENIED/);
+    });
+
+    it('safely saves files and detects external write conflicts', async () => {
+      const targetFile = path.join(tempWorkspaceDir, 'conflict_test.ino');
+      await handleWriteFile(null, { filePath: targetFile, content: 'v1' });
+
+      const readRes = await handleReadFile(null, targetFile);
+      const originalMtime = readRes.mtime;
+
+      // Simulate external write occurring 100ms later
+      await new Promise((r) => setTimeout(r, 60));
+      await fs.promises.writeFile(targetFile, 'v2_external_edit', 'utf8');
+
+      // Attempt to save with outdated expectedMtime
+      await expect(
+        handleSaveFileSafe(null, {
+          filePath: targetFile,
+          content: 'v3_my_edit',
+          expectedMtime: originalMtime
+        })
+      ).rejects.toThrow(/CONFLICT_DETECTED/);
+    });
+
+    it('creates automated backups and reverts file modifications cleanly', async () => {
+      const targetFile = path.join(tempWorkspaceDir, 'revert_test.ino');
+      await handleWriteFile(null, { filePath: targetFile, content: 'original_firmware_code' });
+
+      // Create backup
+      const backupRes = await handleCreateBackup(null, { filePath: targetFile });
+      expect(backupRes.success).toBe(true);
+      expect(fs.existsSync(backupRes.backupPath)).toBe(true);
+
+      // AI modifies file
+      await handleWriteFile(null, { filePath: targetFile, content: 'ai_altered_firmware' });
+      const altered = await handleReadFile(null, targetFile);
+      expect(altered.content).toBe('ai_altered_firmware');
+
+      // Revert from backup
+      const revertRes = await handleRevertFile(null, { filePath: targetFile, backupId: backupRes.backupId });
+      expect(revertRes.success).toBe(true);
+      expect(revertRes.content).toBe('original_firmware_code');
+    });
+
+    it('initializes a project from an ESP32 template without overwriting existing files', async () => {
+      const projectSubDir = path.join(tempWorkspaceDir, 'my_esp32_cam_proj');
+      await fs.promises.mkdir(projectSubDir, { recursive: true });
+
+      // Pre-create an existing file that should NOT be overwritten
+      const preExistingFile = path.join(projectSubDir, 'custom.txt');
+      await fs.promises.writeFile(preExistingFile, 'user_notes', 'utf8');
+
+      const createProjRes = await handleCreateProject(null, {
+        targetFolder: projectSubDir,
+        templateId: 'esp32cam',
+        projectName: 'My ESP32 Camera'
+      });
+
+      expect(createProjRes.success).toBe(true);
+      expect(fs.existsSync(path.join(projectSubDir, 'sketch.ino'))).toBe(true);
+      expect(fs.existsSync(path.join(projectSubDir, 'camera_pins.h'))).toBe(true);
+      expect(fs.existsSync(path.join(projectSubDir, 'circuitsage.json'))).toBe(true);
+      expect(fs.existsSync(preExistingFile)).toBe(true);
+
+      // Metadata persistence check
+      const meta = await handleGetProjectMetadata();
+      expect(meta.metadata).toBeDefined();
+      expect(meta.metadata.board).toBe('AI Thinker ESP32-CAM');
+
+      // Update metadata board configuration without overwriting existing files
+      const updateRes = await handleSaveProjectMetadata(null, {
+        metadata: {
+          board: 'AI Thinker ESP32-CAM (Updated)',
+          customFqbn: 'esp32:esp32:esp32cam:FlashFreq=80'
+        }
+      });
+      expect(updateRes.success).toBe(true);
+      const reloadedMeta = await handleGetProjectMetadata();
+      expect(reloadedMeta.metadata.customFqbn).toBe('esp32:esp32:esp32cam:FlashFreq=80');
+      // Verify custom.txt is still intact
+      expect(fs.readFileSync(preExistingFile, 'utf8')).toBe('user_notes');
     });
   });
 });

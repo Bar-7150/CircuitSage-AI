@@ -30,7 +30,9 @@ export default function IdeTopBar({
   onToggleRightSidebar,
   onToggleBottomPanel,
   activeView,
-  onToggleDiagnosticView
+  onToggleDiagnosticView,
+  onOpenWorkspaceFolder,
+  onNewProject
 }) {
   return (
     <header
@@ -56,12 +58,34 @@ export default function IdeTopBar({
 
         <span className="text-slate-700 hidden md:inline">|</span>
 
-        {/* Project Title */}
-        <div className="flex items-center gap-1.5 text-slate-300 font-mono" title="Active Project">
-          <span className="text-slate-500">📁</span>
-          <span className="font-medium text-slate-200 truncate max-w-[140px] md:max-w-[200px]">
-            {projectName || 'esp32_cam_project'}
-          </span>
+        {/* Project Title & Management Actions */}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 text-slate-300 font-mono" title="Active Project">
+            <span className="text-slate-500">📁</span>
+            <span className="font-medium text-slate-200 truncate max-w-[120px] md:max-w-[180px]">
+              {projectName || 'esp32_cam_project'}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenWorkspaceFolder}
+            className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-mono text-[11px] flex items-center gap-1"
+            title="Open Project Folder (Local Directory)"
+          >
+            <span>📂</span>
+            <span className="hidden lg:inline">Open</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onNewProject}
+            className="px-2 py-1 rounded bg-blue-950/80 hover:bg-blue-900 text-blue-300 border border-blue-800 font-mono text-[11px] flex items-center gap-1"
+            title="Create New Project from Template"
+          >
+            <span>+</span>
+            <span className="hidden lg:inline">New Project</span>
+          </button>
         </div>
       </div>
 

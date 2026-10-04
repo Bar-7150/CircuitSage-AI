@@ -100,3 +100,57 @@ FQBN: \`esp32:esp32:esp32cam\`
 `
   }
 ];
+
+export const SUPPORTED_TEMPLATES = [
+  {
+    id: 'esp32cam',
+    name: 'AI Thinker ESP32-CAM',
+    description: 'Blink flash LED (GPIO 4), camera pin map, watchdog protection',
+    boardId: 'AI Thinker ESP32-CAM',
+    fqbn: 'esp32:esp32:esp32cam',
+    files: DEFAULT_ESP32_CAM_FILES
+  },
+  {
+    id: 'esp32_dev',
+    name: 'ESP32 Dev Module (WiFi & Sensor Node)',
+    description: 'Dual-core FreeRTOS, WiFi telemetry and serial output',
+    boardId: 'ESP32 DevKit v1',
+    fqbn: 'esp32:esp32:esp32',
+    files: [
+      {
+        name: 'esp32_sensor_node.ino',
+        path: 'esp32_sensor_node.ino',
+        language: 'cpp',
+        content: `/**\n * CircuitSage AI — ESP32 Sensor Node\n * Target: ESP32 DevKit v1 (FQBN: esp32:esp32:esp32)\n */\n\nvoid setup() {\n  Serial.begin(115200);\n  delay(1000);\n  Serial.println("[ESP32] Telemetry Sensor Node Online");\n}\n\nvoid loop() {\n  Serial.println("[Telemetry] Ping: OK");\n  delay(1000);\n}\n`
+      },
+      {
+        name: 'README.md',
+        path: 'README.md',
+        language: 'markdown',
+        content: `# ESP32 Sensor Node\nTarget: ESP32 DevKit v1\n`
+      }
+    ]
+  },
+  {
+    id: 'arduino_uno',
+    name: 'Arduino Uno R3 Starter',
+    description: 'Classic ATmega328P standard LED blink and basic I/O sketch',
+    boardId: 'Arduino Uno R3',
+    fqbn: 'arduino:avr:uno',
+    files: [
+      {
+        name: 'uno_blink.ino',
+        path: 'uno_blink.ino',
+        language: 'cpp',
+        content: `/**\n * CircuitSage AI — Arduino Uno R3 Starter\n * Target: Arduino Uno R3 (FQBN: arduino:avr:uno)\n */\n\nvoid setup() {\n  pinMode(LED_BUILTIN, OUTPUT);\n  Serial.begin(9600);\n  Serial.println("Arduino Uno R3 ready.");\n}\n\nvoid loop() {\n  digitalWrite(LED_BUILTIN, HIGH);\n  delay(500);\n  digitalWrite(LED_BUILTIN, LOW);\n  delay(500);\n}\n`
+      },
+      {
+        name: 'README.md',
+        path: 'README.md',
+        language: 'markdown',
+        content: `# Arduino Uno Project\nTarget: Arduino Uno R3 (ATmega328P)\n`
+      }
+    ]
+  }
+];
+

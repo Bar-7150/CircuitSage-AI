@@ -174,6 +174,15 @@ export default function IdeEditorWorkspace({
               tabSize: 2,
               wordWrap: 'on',
               lineNumbers: 'on',
+              folding: true,
+              foldingHighlight: true,
+              foldingStrategy: 'auto',
+              showFoldingControls: 'always',
+              find: {
+                addExtraSpaceOnTop: false,
+                autoFindInSelection: 'never',
+                seedSearchStringFromSelection: 'always'
+              },
               renderWhitespace: 'selection',
               renderLineHighlight: 'all',
               smoothScrolling: true,

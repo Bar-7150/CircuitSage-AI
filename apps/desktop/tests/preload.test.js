@@ -49,9 +49,18 @@ describe('Desktop Preload API Security Verification', () => {
   it('should verify workspace operations are restricted to approved methods', () => {
     const workspaceMethods = Object.keys(exposedApiValue.workspace);
     expect(workspaceMethods.sort()).toEqual([
+      'createBackup',
+      'createFile',
+      'createProject',
+      'deleteFile',
       'getActiveWorkspace',
+      'getProjectMetadata',
       'listFiles',
       'readFile',
+      'renameFile',
+      'revertFile',
+      'saveFileSafe',
+      'saveProjectMetadata',
       'selectFolder',
       'writeFile'
     ]);

@@ -2,18 +2,20 @@
  * CircuitSage AI — Master IDE Layout Component
  *
  * Coordinates:
- * 1. Top bar: Branding, project title, board selector, port selector, Build & Upload
- * 2. Left sidebar: Project explorer, search, board configuration, and project actions
- * 3. Center workspace: Monaco Editor with tab strip and diagnostic squiggles
- * 4. Right sidebar: AI agent chat, task plan, diffs, and embedded circuit triage
+ * 1. Top bar: Branding, project title, board selector, port selector, Build & Upload, Open/New project
+ * 2. Left sidebar: Project explorer, search, board configuration, and project actions (with rename & delete)
+ * 3. Center workspace: Monaco Editor with tab strip, folding, find/replace, and diagnostic squiggles
+ * 4. Right sidebar: AI agent chat, task plan, diffs, undo/revert to backup, and embedded circuit triage
  * 5. Bottom panel: Problems, Build Output, Serial Monitor, and Task Logs
  * 6. Status bar: Board, port, baud rate, editor state, build state, and AI state
  *
  * Implements:
- * - Resizable panels with drag handles
- * - Keyboard shortcuts (Ctrl+B build, Ctrl+S save)
- * - Persistent preferences via localStorage
- * - Seamless desktop IPC integration (when running in Electron shell) with browser fallbacks
+ * - Real desktop workspace integration via window.electronAPI.workspace
+ * - Safe file saving with mtime conflict detection & resolution modal
+ * - Multi-file tab management with unsaved-change indicators
+ * - AI diff backup & revert functionality
+ * - Template-based new project creation modal (ESP32-CAM, ESP32 Dev, Uno)
+ * - Safe project metadata & board configuration persistence (circuitsage.json)
  */
 
 'use client';
@@ -25,12 +27,12 @@ import IdeEditorWorkspace from './IdeEditorWorkspace';
 import IdeRightSidebar from './IdeRightSidebar';
 import IdeBottomPanel from './IdeBottomPanel';
 import IdeStatusBar from './IdeStatusBar';
-import { DEFAULT_ESP32_CAM_FILES } from '../../lib/ideTemplates';
+import { DEFAULT_ESP32_CAM_FILES, SUPPORTED_TEMPLATES } from '../../lib/ideTemplates';
 import { SUPPORTED_BOARDS } from '../../lib/constants';
 import { getIdePreferences, saveIdePreferences } from '../../lib/storage';
 
 export default function IdeLayout({ diagnosticComponent }) {
-  // Initialized from persistent preferences
+  // UI Sizing Preferences
   const [prefsLoaded, setPrefsLoaded] = useState(false);
   const [leftWidth, setLeftWidth] = useState(250);
   const [rightWidth, setRightWidth] = useState(340);
@@ -46,14 +48,27 @@ export default function IdeLayout({ diagnosticComponent }) {
   const [selectedPort, setSelectedPort] = useState('COM3');
   const [baudRate, setBaudRate] = useState(115200);
 
-  // Project & File State
-  const [projectName] = useState('esp32_cam_firmware');
+  // Project & Workspace State
+  const [workspacePath, setWorkspacePath] = useState(null);
+  const [projectName, setProjectName] = useState('esp32_cam_firmware');
+  const [projectMetadata, setProjectMetadata] = useState(null);
   const [files, setFiles] = useState(DEFAULT_ESP32_CAM_FILES);
   const [activeFileName, setActiveFileName] = useState('esp32_cam_blink.ino');
   const [openTabs, setOpenTabs] = useState([
     { name: 'esp32_cam_blink.ino', isDirty: false },
     { name: 'camera_pins.h', isDirty: false }
   ]);
+
+  // AI Diff Backup & Revert State
+  const [appliedBackupId, setAppliedBackupId] = useState(null);
+
+  // Modals
+  const [conflictModal, setConflictModal] = useState(null);
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [newProjectForm, setNewProjectForm] = useState({
+    name: 'esp32_project',
+    templateId: 'esp32cam'
+  });
 
   // Cursor & Editor State
   const [cursorPos, setCursorPos] = useState({ lineNumber: 1, column: 1 });
@@ -86,6 +101,68 @@ export default function IdeLayout({ diagnosticComponent }) {
   const isResizingRight = useRef(false);
   const isResizingBottom = useRef(false);
 
+  // Helper to load files and metadata from an authorized directory
+  const loadWorkspaceFromDirectory = useCallback(async (dirPath) => {
+    if (typeof window === 'undefined' || !window.electronAPI?.workspace) return;
+    try {
+      const listRes = await window.electronAPI.workspace.listFiles();
+      if (!listRes.success) {
+        throw new Error(listRes.error || 'Failed to list files');
+      }
+
+      // Check for circuitsage.json metadata
+      const metaRes = await window.electronAPI.workspace.getProjectMetadata();
+      if (metaRes?.success && metaRes.metadata) {
+        setProjectMetadata(metaRes.metadata);
+        if (metaRes.metadata.boardId || metaRes.metadata.board) {
+          setSelectedBoardId(metaRes.metadata.boardId || metaRes.metadata.board);
+        }
+      }
+
+      const loadedFiles = [];
+      for (const item of listRes.files) {
+        if (!item.isDirectory) {
+          try {
+            const fileRes = await window.electronAPI.workspace.readFile({ filePath: item.path });
+            if (fileRes.success) {
+              const ext = item.name.split('.').pop().toLowerCase();
+              const lang = ['ino', 'cpp', 'c', 'h', 'hpp'].includes(ext) ? 'cpp' : ext === 'json' ? 'json' : ext === 'md' ? 'markdown' : 'plaintext';
+              loadedFiles.push({
+                name: item.name,
+                path: item.path,
+                content: fileRes.content,
+                mtime: fileRes.mtime,
+                language: lang
+              });
+            }
+          } catch (err) {
+            console.warn(`Could not read file: ${item.path}`, err);
+          }
+        }
+      }
+
+      if (loadedFiles.length > 0) {
+        setFiles(loadedFiles);
+        const mainIno = loadedFiles.find((f) => f.name.endsWith('.ino')) || loadedFiles[0];
+        setActiveFileName(mainIno.name);
+        setOpenTabs([{ name: mainIno.name, isDirty: false }]);
+      }
+
+      setWorkspacePath(dirPath);
+      const folderBase = dirPath.split(/[\\/]/).filter(Boolean).pop() || 'project';
+      setProjectName(folderBase);
+      setTaskLogs((prev) => [
+        { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Opened project '${folderBase}' with ${loadedFiles.length} file(s).` },
+        ...prev
+      ]);
+    } catch (err) {
+      setTaskLogs((prev) => [
+        { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Error loading workspace: ${err.message}` },
+        ...prev
+      ]);
+    }
+  }, []);
+
   // Load preferences and detect hardware ports on mount
   useEffect(() => {
     const prefs = getIdePreferences();
@@ -100,7 +177,7 @@ export default function IdeLayout({ diagnosticComponent }) {
     setPrefsLoaded(true);
 
     // Detect ports from Electron if available
-    async function detectPorts() {
+    async function detectEnvironment() {
       if (typeof window !== 'undefined' && window.electronAPI?.hardware?.listPorts) {
         try {
           const res = await window.electronAPI.hardware.listPorts();
@@ -122,10 +199,22 @@ export default function IdeLayout({ diagnosticComponent }) {
           { path: 'COM4', name: 'COM4 (CP2102 USB to UART)' }
         ]);
       }
+
+      // Check if Electron already has an active workspace folder open
+      if (typeof window !== 'undefined' && window.electronAPI?.workspace?.getActiveWorkspace) {
+        try {
+          const activeWs = await window.electronAPI.workspace.getActiveWorkspace();
+          if (activeWs?.path) {
+            await loadWorkspaceFromDirectory(activeWs.path);
+          }
+        } catch (e) {
+          console.debug('No prior active workspace', e);
+        }
+      }
     }
 
-    detectPorts();
-  }, []);
+    detectEnvironment();
+  }, [loadWorkspaceFromDirectory]);
 
   // Save updated preferences whenever panel dimensions change
   useEffect(() => {
@@ -150,7 +239,7 @@ export default function IdeLayout({ diagnosticComponent }) {
         const next = Math.max(260, Math.min(650, window.innerWidth - e.clientX));
         setRightWidth(next);
       } else if (isResizingBottom.current) {
-        const next = Math.max(120, Math.min(600, window.innerHeight - e.clientY - 24)); // subtract status bar
+        const next = Math.max(120, Math.min(600, window.innerHeight - e.clientY - 24));
         setBottomHeight(next);
       }
     }
@@ -184,14 +273,96 @@ export default function IdeLayout({ diagnosticComponent }) {
     );
   }
 
-  function handleSaveActiveFile() {
-    setOpenTabs((prev) =>
-      prev.map((t) => (t.name === activeFileName ? { ...t, isDirty: false } : t))
-    );
-    setTaskLogs((prev) => [
-      { time: new Date().toLocaleTimeString(), source: 'Editor', message: `Saved '${activeFileName}' successfully.` },
-      ...prev
-    ]);
+  // Safe Save with Conflict Detection
+  async function handleSaveActiveFile() {
+    const fileToSave = files.find((f) => f.name === activeFileName);
+    if (!fileToSave) return;
+
+    if (typeof window !== 'undefined' && window.electronAPI?.workspace?.saveFileSafe && workspacePath) {
+      try {
+        const targetPath = fileToSave.path || fileToSave.name;
+        const res = await window.electronAPI.workspace.saveFileSafe({
+          filePath: targetPath,
+          content: fileToSave.content,
+          expectedMtime: fileToSave.mtime
+        });
+
+        if (res.success) {
+          setFiles((prev) =>
+            prev.map((f) => (f.name === activeFileName ? { ...f, mtime: res.mtime } : f))
+          );
+          setOpenTabs((prev) =>
+            prev.map((t) => (t.name === activeFileName ? { ...t, isDirty: false } : t))
+          );
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'Editor', message: `Saved '${activeFileName}' safely.` },
+            ...prev
+          ]);
+        } else if (res.error === 'CONFLICT_DETECTED') {
+          // Open save conflict dialog
+          setConflictModal({
+            filePath: targetPath,
+            expectedMtime: fileToSave.mtime,
+            currentMtime: res.currentMtime,
+            onOverwrite: async () => {
+              const forceRes = await window.electronAPI.workspace.saveFileSafe({
+                filePath: targetPath,
+                content: fileToSave.content,
+                expectedMtime: res.currentMtime
+              });
+              if (forceRes.success) {
+                setFiles((prev) =>
+                  prev.map((f) => (f.name === activeFileName ? { ...f, mtime: forceRes.mtime } : f))
+                );
+                setOpenTabs((prev) =>
+                  prev.map((t) => (t.name === activeFileName ? { ...t, isDirty: false } : t))
+                );
+                setTaskLogs((prev) => [
+                  { time: new Date().toLocaleTimeString(), source: 'Editor', message: `Overwrote conflict on '${activeFileName}'.` },
+                  ...prev
+                ]);
+              }
+              setConflictModal(null);
+            },
+            onReload: async () => {
+              const reloadRes = await window.electronAPI.workspace.readFile({ filePath: targetPath });
+              if (reloadRes.success) {
+                setFiles((prev) =>
+                  prev.map((f) => (f.name === activeFileName ? { ...f, content: reloadRes.content, mtime: reloadRes.mtime } : f))
+                );
+                setOpenTabs((prev) =>
+                  prev.map((t) => (t.name === activeFileName ? { ...t, isDirty: false } : t))
+                );
+                setTaskLogs((prev) => [
+                  { time: new Date().toLocaleTimeString(), source: 'Editor', message: `Reloaded '${activeFileName}' from disk.` },
+                  ...prev
+                ]);
+              }
+              setConflictModal(null);
+            }
+          });
+        } else {
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'Editor', message: `Failed to save '${activeFileName}': ${res.message || res.error}` },
+            ...prev
+          ]);
+        }
+      } catch (err) {
+        setTaskLogs((prev) => [
+          { time: new Date().toLocaleTimeString(), source: 'Editor', message: `Save error: ${err.message}` },
+          ...prev
+        ]);
+      }
+    } else {
+      // Browser fallback
+      setOpenTabs((prev) =>
+        prev.map((t) => (t.name === activeFileName ? { ...t, isDirty: false } : t))
+      );
+      setTaskLogs((prev) => [
+        { time: new Date().toLocaleTimeString(), source: 'Editor', message: `Saved '${activeFileName}' locally.` },
+        ...prev
+      ]);
+    }
   }
 
   function handleSelectFile(name) {
@@ -209,28 +380,311 @@ export default function IdeLayout({ diagnosticComponent }) {
     }
   }
 
-  function handleCreateFile(name) {
-    if (!files.some((f) => f.name === name)) {
+  // Create Workspace File
+  async function handleCreateFile(name) {
+    if (files.some((f) => f.name === name)) {
+      handleSelectFile(name);
+      return;
+    }
+
+    const defaultContent = `// ${name}\n`;
+    if (typeof window !== 'undefined' && window.electronAPI?.workspace?.createFile && workspacePath) {
+      try {
+        const res = await window.electronAPI.workspace.createFile({ filePath: name, content: defaultContent });
+        if (res.success) {
+          const ext = name.split('.').pop().toLowerCase();
+          const lang = ['ino', 'cpp', 'c', 'h', 'hpp'].includes(ext) ? 'cpp' : ext === 'json' ? 'json' : 'plaintext';
+          const newFile = {
+            name,
+            path: res.filePath || name,
+            language: lang,
+            content: defaultContent,
+            mtime: res.mtime
+          };
+          setFiles((prev) => [...prev, newFile]);
+          handleSelectFile(name);
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Created workspace file '${name}'.` },
+            ...prev
+          ]);
+        } else {
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Create file failed: ${res.message || res.error}` },
+            ...prev
+          ]);
+        }
+      } catch (err) {
+        setTaskLogs((prev) => [
+          { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Create file error: ${err.message}` },
+          ...prev
+        ]);
+      }
+    } else {
+      const ext = name.split('.').pop().toLowerCase();
+      const lang = ['ino', 'cpp', 'c', 'h', 'hpp'].includes(ext) ? 'cpp' : ext === 'json' ? 'json' : 'plaintext';
       const newFile = {
         name,
         path: name,
-        language: name.endsWith('.h') ? 'cpp' : name.endsWith('.json') ? 'json' : 'cpp',
-        content: `// ${name}\n`
+        language: lang,
+        content: defaultContent
       };
       setFiles((prev) => [...prev, newFile]);
       handleSelectFile(name);
     }
   }
 
-  function handleDeleteFile(name) {
-    setFiles((prev) => prev.filter((f) => f.name !== name));
-    handleCloseTab(name);
+  // Rename Workspace File
+  async function handleRenameFile(oldName, newName) {
+    if (!newName || oldName === newName) return;
+
+    if (typeof window !== 'undefined' && window.electronAPI?.workspace?.renameFile && workspacePath) {
+      try {
+        const res = await window.electronAPI.workspace.renameFile({ oldPath: oldName, newPath: newName });
+        if (res.success) {
+          setFiles((prev) =>
+            prev.map((f) => (f.name === oldName ? { ...f, name: newName, path: res.newPath || newName } : f))
+          );
+          setOpenTabs((prev) =>
+            prev.map((t) => (t.name === oldName ? { ...t, name: newName } : t))
+          );
+          if (activeFileName === oldName) {
+            setActiveFileName(newName);
+          }
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Renamed '${oldName}' to '${newName}'.` },
+            ...prev
+          ]);
+        } else {
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Rename failed: ${res.message || res.error}` },
+            ...prev
+          ]);
+        }
+      } catch (err) {
+        setTaskLogs((prev) => [
+          { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Rename error: ${err.message}` },
+          ...prev
+        ]);
+      }
+    } else {
+      setFiles((prev) =>
+        prev.map((f) => (f.name === oldName ? { ...f, name: newName, path: newName } : f))
+      );
+      setOpenTabs((prev) =>
+        prev.map((t) => (t.name === oldName ? { ...t, name: newName } : t))
+      );
+      if (activeFileName === oldName) {
+        setActiveFileName(newName);
+      }
+    }
+  }
+
+  // Delete Workspace File
+  async function handleDeleteFile(name) {
+    if (typeof window !== 'undefined' && !window.confirm(`Are you sure you want to permanently delete '${name}'?`)) {
+      return;
+    }
+
+    if (typeof window !== 'undefined' && window.electronAPI?.workspace?.deleteFile && workspacePath) {
+      try {
+        const res = await window.electronAPI.workspace.deleteFile({ filePath: name });
+        if (res.success) {
+          setFiles((prev) => prev.filter((f) => f.name !== name));
+          handleCloseTab(name);
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Deleted file '${name}'.` },
+            ...prev
+          ]);
+        } else {
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Delete failed: ${res.message || res.error}` },
+            ...prev
+          ]);
+        }
+      } catch (err) {
+        setTaskLogs((prev) => [
+          { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Delete error: ${err.message}` },
+          ...prev
+        ]);
+      }
+    } else {
+      setFiles((prev) => prev.filter((f) => f.name !== name));
+      handleCloseTab(name);
+    }
   }
 
   // Active Board Configuration
   const currentBoardObj =
     SUPPORTED_BOARDS.find((b) => b.id === selectedBoardId || b.name === selectedBoardId) ||
     SUPPORTED_BOARDS[1]; // default to ESP32-CAM
+
+  // Update Board with Project Metadata persistence
+  async function handleSelectBoardWithMetadata(boardId) {
+    setSelectedBoardId(boardId);
+    const boardObj = SUPPORTED_BOARDS.find((b) => b.id === boardId || b.name === boardId);
+    if (typeof window !== 'undefined' && window.electronAPI?.workspace?.saveProjectMetadata && workspacePath && boardObj) {
+      try {
+        await window.electronAPI.workspace.saveProjectMetadata({
+          metadata: {
+            board: boardObj.name,
+            boardId: boardObj.id,
+            targetFqbn: boardObj.fqbn
+          }
+        });
+        setTaskLogs((prev) => [
+          { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Updated board configuration in circuitsage.json to '${boardObj.name}'.` },
+          ...prev
+        ]);
+      } catch (err) {
+        console.warn('Metadata save error:', err);
+      }
+    }
+  }
+
+  // Open Workspace Folder
+  async function handleOpenWorkspaceFolder() {
+    if (typeof window !== 'undefined' && window.electronAPI?.workspace?.selectFolder) {
+      try {
+        const res = await window.electronAPI.workspace.selectFolder();
+        if (!res.canceled && res.path) {
+          await loadWorkspaceFromDirectory(res.path);
+        }
+      } catch (err) {
+        setTaskLogs((prev) => [
+          { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Failed to open folder: ${err.message}` },
+          ...prev
+        ]);
+      }
+    } else {
+      alert('Desktop File System Explorer is available when running in the CircuitSage Electron desktop shell.');
+    }
+  }
+
+  // Execute New Project Creation
+  async function handleExecuteCreateProject() {
+    const { name, templateId } = newProjectForm;
+    if (!name.trim()) return;
+
+    if (typeof window !== 'undefined' && window.electronAPI?.workspace?.createProject) {
+      try {
+        const res = await window.electronAPI.workspace.createProject({
+          templateId,
+          projectName: name.trim()
+        });
+        if (res.success && res.projectPath) {
+          setShowNewProjectModal(false);
+          await loadWorkspaceFromDirectory(res.projectPath);
+          return;
+        }
+      } catch (err) {
+        setTaskLogs((prev) => [
+          { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Project creation error: ${err.message}` },
+          ...prev
+        ]);
+      }
+    }
+
+    // Browser fallback
+    const tmpl = SUPPORTED_TEMPLATES.find((t) => t.id === templateId) || SUPPORTED_TEMPLATES[0];
+    setFiles(tmpl.files);
+    setProjectName(name.trim());
+    setSelectedBoardId(tmpl.boardId);
+    setActiveFileName(tmpl.files[0].name);
+    setOpenTabs([{ name: tmpl.files[0].name, isDirty: false }]);
+    setShowNewProjectModal(false);
+    setTaskLogs((prev) => [
+      { time: new Date().toLocaleTimeString(), source: 'Workspace', message: `Created project '${name.trim()}' with '${tmpl.name}' template.` },
+      ...prev
+    ]);
+  }
+
+  // Apply AI Suggested Code Changes with Backup
+  async function handleApplyAiDiff(diff) {
+    if (!diff?.newSnippet) return;
+
+    // In Electron workspace, create safety backup before applying diff
+    if (typeof window !== 'undefined' && window.electronAPI?.workspace?.createBackup && workspacePath) {
+      try {
+        const backupRes = await window.electronAPI.workspace.createBackup({ filePath: diff.file });
+        if (backupRes.success) {
+          setAppliedBackupId(backupRes.backupId);
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'AI Assistant', message: `Created safety backup '${backupRes.backupId}' for '${diff.file}'.` },
+            ...prev
+          ]);
+        }
+      } catch (err) {
+        console.warn('Backup creation failed:', err);
+      }
+    }
+
+    setFiles((prev) =>
+      prev.map((f) => {
+        if (f.name === diff.file) {
+          const updated = f.content.includes(diff.oldSnippet)
+            ? f.content.replace(diff.oldSnippet, diff.newSnippet)
+            : `${f.content}\n// AI suggestion:\n${diff.newSnippet}`;
+          return { ...f, content: updated };
+        }
+        return f;
+      })
+    );
+
+    setOpenTabs((prev) =>
+      prev.map((t) => (t.name === diff.file ? { ...t, isDirty: true } : t))
+    );
+
+    setTaskLogs((prev) => [
+      { time: new Date().toLocaleTimeString(), source: 'AI Assistant', message: `Applied approved diff to '${diff.file}'.` },
+      ...prev
+    ]);
+  }
+
+  // Revert AI Suggested Code Changes from Backup
+  async function handleRevertAiDiff(backupId) {
+    if (typeof window !== 'undefined' && window.electronAPI?.workspace?.revertFile && workspacePath && backupId) {
+      try {
+        const res = await window.electronAPI.workspace.revertFile({ filePath: activeFileName, backupId });
+        if (res.success) {
+          const readRes = await window.electronAPI.workspace.readFile({ filePath: activeFileName });
+          if (readRes.success) {
+            setFiles((prev) =>
+              prev.map((f) => (f.name === activeFileName ? { ...f, content: readRes.content, mtime: readRes.mtime } : f))
+            );
+            setOpenTabs((prev) =>
+              prev.map((t) => (t.name === activeFileName ? { ...t, isDirty: false } : t))
+            );
+          }
+          setAppliedBackupId(null);
+          setTaskLogs((prev) => [
+            { time: new Date().toLocaleTimeString(), source: 'AI Assistant', message: `Reverted '${activeFileName}' to backup '${backupId}'.` },
+            ...prev
+          ]);
+        }
+      } catch (err) {
+        setTaskLogs((prev) => [
+          { time: new Date().toLocaleTimeString(), source: 'AI Assistant', message: `Revert failed: ${err.message}` },
+          ...prev
+        ]);
+      }
+    } else {
+      // Browser fallback: restore initial template content
+      const tmpl = DEFAULT_ESP32_CAM_FILES.find((f) => f.name === activeFileName);
+      if (tmpl) {
+        setFiles((prev) =>
+          prev.map((f) => (f.name === activeFileName ? { ...f, content: tmpl.content } : f))
+        );
+        setOpenTabs((prev) =>
+          prev.map((t) => (t.name === activeFileName ? { ...t, isDirty: false } : t))
+        );
+      }
+      setAppliedBackupId(null);
+      setTaskLogs((prev) => [
+        { time: new Date().toLocaleTimeString(), source: 'AI Assistant', message: `Reverted '${activeFileName}' changes.` },
+        ...prev
+      ]);
+    }
+  }
 
   // =========================================================================
   // BUILD & TOOLCHAIN ORCHESTRATION
@@ -284,11 +738,10 @@ export default function IdeLayout({ diagnosticComponent }) {
         setIsBuilding(false);
       }
     } else {
-      // Browser demonstration mode: Realistic simulation based on genuine compiler output
+      // Browser demonstration mode
       setTimeout(() => {
         const duration = ((Date.now() - startTime) / 1000).toFixed(2);
 
-        // Check for intentional syntax error
         if (fileContent.includes('error') || fileContent.includes('undeclared_')) {
           const fakeError = {
             success: false,
@@ -374,26 +827,6 @@ export default function IdeLayout({ diagnosticComponent }) {
     ]);
   }
 
-  function handleOpenWorkspaceFolder() {
-    if (typeof window !== 'undefined' && window.electronAPI?.workspace?.selectFolder) {
-      window.electronAPI.workspace.selectFolder();
-    } else {
-      alert('Desktop File System Explorer is available when running in the CircuitSage Electron desktop shell.');
-    }
-  }
-
-  function handleApplyAiDiff(diff) {
-    if (diff.newSnippet) {
-      setFiles((prev) =>
-        prev.map((f) => (f.name === diff.file ? { ...f, content: f.content.replace(diff.oldSnippet, diff.newSnippet) } : f))
-      );
-      setTaskLogs((prev) => [
-        { time: new Date().toLocaleTimeString(), source: 'AI Assistant', message: `Applied approved diff to '${diff.file}'.` },
-        ...prev
-      ]);
-    }
-  }
-
   return (
     <div className="h-screen w-screen flex flex-col bg-slate-950 text-slate-100 overflow-hidden font-sans select-none">
       {/* 1. Top Bar */}
@@ -401,7 +834,7 @@ export default function IdeLayout({ diagnosticComponent }) {
         projectName={projectName}
         boards={SUPPORTED_BOARDS}
         selectedBoard={currentBoardObj}
-        onSelectBoard={(id) => setSelectedBoardId(id)}
+        onSelectBoard={handleSelectBoardWithMetadata}
         ports={availablePorts}
         selectedPort={selectedPort}
         onSelectPort={setSelectedPort}
@@ -415,6 +848,8 @@ export default function IdeLayout({ diagnosticComponent }) {
         onToggleBottomPanel={() => setBottomCollapsed(!bottomCollapsed)}
         activeView={activeView}
         onToggleDiagnosticView={() => setActiveView(activeView === 'editor' ? 'diagnostics' : 'editor')}
+        onOpenWorkspaceFolder={handleOpenWorkspaceFolder}
+        onNewProject={() => setShowNewProjectModal(true)}
       />
 
       {/* Main Workspace Body with 3-column + bottom layout */}
@@ -430,9 +865,12 @@ export default function IdeLayout({ diagnosticComponent }) {
               activeFile={activeFileName}
               onSelectFile={handleSelectFile}
               onCreateFile={handleCreateFile}
+              onRenameFile={handleRenameFile}
               onDeleteFile={handleDeleteFile}
               selectedBoard={currentBoardObj}
               onOpenWorkspaceFolder={handleOpenWorkspaceFolder}
+              onNewProject={() => setShowNewProjectModal(true)}
+              projectMetadata={projectMetadata}
               onTriggerCleanBuild={handleBuild}
               isBuilding={isBuilding}
             />
@@ -531,6 +969,8 @@ export default function IdeLayout({ diagnosticComponent }) {
               fileContent={fileContent}
               selectedBoard={currentBoardObj}
               onApplyDiff={handleApplyAiDiff}
+              onRevertDiff={handleRevertAiDiff}
+              appliedBackupId={appliedBackupId}
               diagnosticComponent={diagnosticComponent}
             />
           </div>
@@ -547,6 +987,125 @@ export default function IdeLayout({ diagnosticComponent }) {
         aiState="ready"
         epistemicStatus="VERIFIED_FACT"
       />
+
+      {/* Save Conflict Resolution Modal */}
+      {conflictModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-amber-500/60 rounded-xl p-5 max-w-md w-full shadow-2xl space-y-4 font-mono">
+            <div className="flex items-center gap-3 text-amber-400">
+              <span className="text-2xl">⚠️</span>
+              <div>
+                <h3 className="font-semibold text-sm">Save Conflict Detected</h3>
+                <p className="text-[11px] text-slate-400">External disk changes detected</p>
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              The file <strong className="text-blue-300">{conflictModal.filePath}</strong> was modified by another process on disk since you opened it. Saving your changes will overwrite those external edits.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={conflictModal.onReload}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs"
+              >
+                Reload from Disk
+              </button>
+              <button
+                type="button"
+                onClick={conflictModal.onOverwrite}
+                className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold shadow-md shadow-amber-600/30"
+              >
+                Overwrite Disk File
+              </button>
+              <button
+                type="button"
+                onClick={() => setConflictModal(null)}
+                className="px-2 py-1.5 text-slate-400 hover:text-slate-200 text-xs"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Project Creation Modal */}
+      {showNewProjectModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 max-w-lg w-full shadow-2xl space-y-4 font-mono">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-5 h-5 rounded bg-blue-600 flex items-center justify-center text-xs text-white">⚡</span>
+                <h3 className="font-semibold text-slate-100 text-sm">Create New IoT / Firmware Project</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNewProjectModal(false)}
+                className="text-slate-400 hover:text-slate-200 text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Project Name */}
+            <div className="space-y-1">
+              <label className="text-xs text-slate-300 font-semibold">Project Name</label>
+              <input
+                type="text"
+                value={newProjectForm.name}
+                onChange={(e) => setNewProjectForm((prev) => ({ ...prev, name: e.target.value }))}
+                className="w-full px-3 py-2 rounded-lg bg-slate-950 border border-slate-700 text-slate-100 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
+                placeholder="esp32_sensor_node"
+              />
+            </div>
+
+            {/* Template Selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs text-slate-300 font-semibold">Starter Template</label>
+              <div className="space-y-2">
+                {SUPPORTED_TEMPLATES.map((tmpl) => (
+                  <div
+                    key={tmpl.id}
+                    onClick={() => setNewProjectForm((prev) => ({ ...prev, templateId: tmpl.id }))}
+                    className={`p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                      newProjectForm.templateId === tmpl.id
+                        ? 'bg-blue-950/50 border-blue-500 text-slate-100'
+                        : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between text-xs font-semibold">
+                      <span className="text-blue-300">{tmpl.name}</span>
+                      <span className="text-[10px] text-slate-500 font-mono">{tmpl.fqbn}</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">{tmpl.description}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowNewProjectModal(false)}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteCreateProject}
+                disabled={!newProjectForm.name.trim()}
+                className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-semibold shadow-md shadow-blue-600/30"
+              >
+                Create Project
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

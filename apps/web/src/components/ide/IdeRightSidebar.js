@@ -17,6 +17,8 @@ export default function IdeRightSidebar({
   fileContent,
   selectedBoard,
   onApplyDiff,
+  onRevertDiff,
+  appliedBackupId,
   diagnosticComponent
 }) {
   const [activeTab, setActiveTab] = useState('chat'); // 'chat' | 'plan' | 'diffs' | 'triage'
@@ -336,6 +338,21 @@ export default function IdeRightSidebar({
                     className="px-3 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-rose-300 border border-slate-800 text-xs"
                   >
                     ✕ Reject
+                  </button>
+                </div>
+              )}
+
+              {(diffStatus === 'accepted' || appliedBackupId) && (
+                <div className="pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (onRevertDiff) onRevertDiff(appliedBackupId);
+                      setDiffStatus('pending');
+                    }}
+                    className="w-full py-2 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/40 text-xs font-mono flex items-center justify-center gap-1.5 transition-colors"
+                  >
+                    <span>↩</span> Revert AI Changes (Undo to Backup)
                   </button>
                 </div>
               )}

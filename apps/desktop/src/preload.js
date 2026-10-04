@@ -23,7 +23,16 @@ const electronAPI = {
     getActiveWorkspace: () => ipcRenderer.invoke('workspace:getActiveWorkspace'),
     listFiles: (dirPath) => ipcRenderer.invoke('workspace:listFiles', dirPath),
     readFile: (filePath) => ipcRenderer.invoke('workspace:readFile', filePath),
-    writeFile: (filePath, content) => ipcRenderer.invoke('workspace:writeFile', { filePath, content })
+    writeFile: (filePath, content) => ipcRenderer.invoke('workspace:writeFile', { filePath, content }),
+    saveFileSafe: (filePath, content, expectedMtime) => ipcRenderer.invoke('workspace:saveFileSafe', { filePath, content, expectedMtime }),
+    createFile: (relativePath, content) => ipcRenderer.invoke('workspace:createFile', { relativePath, content }),
+    renameFile: (oldPath, newPath) => ipcRenderer.invoke('workspace:renameFile', { oldPath, newPath }),
+    deleteFile: (filePath) => ipcRenderer.invoke('workspace:deleteFile', { filePath }),
+    createBackup: (filePath) => ipcRenderer.invoke('workspace:createBackup', { filePath }),
+    revertFile: (filePath, backupId) => ipcRenderer.invoke('workspace:revertFile', { filePath, backupId }),
+    createProject: (payload) => ipcRenderer.invoke('workspace:createProject', payload),
+    getProjectMetadata: () => ipcRenderer.invoke('workspace:getProjectMetadata'),
+    saveProjectMetadata: (metadata) => ipcRenderer.invoke('workspace:saveProjectMetadata', metadata)
   },
 
   // Local Hardware Discovery
